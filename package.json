@@ -1,0 +1,24 @@
+{
+  "name": "color-blind-runner",
+  "version": "1.0.0",
+  "description": "多人协作生存游戏 - 颜色可见性规则",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start:server": "node dist/server/index.js",
+    "dev:server": "tsx src/server/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "fast-check": "^3.23.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
+  }
+}

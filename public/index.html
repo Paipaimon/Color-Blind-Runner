@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Color Blind Runner</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #F5F5F5;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .game-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      height: 100vh;
+      padding: 10px;
+      box-sizing: border-box;
+      position: relative;
+    }
+
+    #gameCanvas {
+      display: block;
+      border-radius: 4px;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      /* box-shadow: 0 0 20px rgba(0, 0, 0, 0.5); */
+    }
+
+    #statusBar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      padding: 8px 16px;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: 4px;
+      color: #333;
+      font-size: 14px;
+      width: 100%;
+      max-width: 100%;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .status-section {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .status-section.basic-info {
+      border-right: 1px solid rgba(255, 255, 255, 0.2);
+      padding-right: 15px;
+      margin-right: 5px;
+    }
+
+    .status-section.game-stats {
+      flex: 1;
+    }
+
+    .status-section.final-stats,
+    .status-section.ranking,
+    .status-section.personal-best {
+      width: 100%;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .section-title {
+      font-weight: bold;
+      color: #666;
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: fit-content;
+    }
+
+    .status-label {
+      color: #666;
+      white-space: nowrap;
+    }
+
+    .status-value {
+      color: #666;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+
+    .color-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #666;
+      flex-shrink: 0;
+    }
+
+    .color-red { background: #E91E63; }
+    .color-green { background: #4CAF50; }
+    .color-blue { background: #2196F3; }
+    .color-yellow { background: #FFEB3B; }
+
+    /* 特殊状态样式 */
+    .countdown-highlight {
+      background: rgba(255, 235, 59, 0.2);
+      padding: 4px 8px;
+      border-radius: 4px;
+      animation: pulse 1s infinite;
+    }
+
+    .death-status {
+      background: rgba(233, 30, 99, 0.2);
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: #E91E63 !important;
+    }
+
+    .new-record {
+      background: rgba(76, 175, 80, 0.2);
+      padding: 4px 8px;
+      border-radius: 4px;
+      animation: celebration 2s ease-in-out;
+    }
+
+    /* 排名样式 */
+    .rank-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      margin-bottom: 4px;
+    }
+
+    .rank-item.my-rank {
+      background: rgba(33, 150, 243, 0.2);
+      border: 1px solid rgba(33, 150, 243, 0.5);
+    }
+
+    .rank-number {
+      font-weight: bold;
+      color: #fff;
+      min-width: 24px;
+    }
+
+    .rank-distance,
+    .rank-time {
+      color: #aaa;
+      font-size: 12px;
+    }
+
+    /* 动画效果 */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    @keyframes celebration {
+      0%, 100% { transform: scale(1); }
+      25% { transform: scale(1.05); }
+      50% { transform: scale(1.1); }
+      75% { transform: scale(1.05); }
+    }
+
+  </style>
+</head>
+<body>
+  <div class="game-wrapper">
+    
+    <div id="statusBar">
+      <div class="status-item">
+        <span class="status-label">房间:</span>
+        <span class="status-value" id="roomId">-</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">颜色:</span>
+        <span class="color-dot" id="colorDot"></span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">玩家:</span>
+        <span class="status-value" id="playerCount">0/4</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">状态:</span>
+        <span class="status-value" id="gameStatus">连接中...</span>
+      </div>
+    </div>
+    <div>点击屏幕准备</div>
+    <canvas id="gameCanvas"></canvas>
+  </div>
+  <div id="status"></div>
+  <script type="module" src="/dist/client/index.js"></script>
+</body>
+</html>
