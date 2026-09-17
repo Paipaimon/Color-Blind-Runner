@@ -2,166 +2,259 @@
 
 ## 项目概述
 
-Color Blind Runner 是一个基于颜色可见性规则的多人在线生存游戏。每个玩家被分配不同的颜色，只能看到特定颜色的障碍物，需要通过协作和沟通来生存更长时间。
+Color Blind Runner 是一个基于「颜色盲区」规则的多人在线生存游戏。
+
+每一局中，每位玩家会被分配一种颜色（红 / 绿 / 蓝 / 黄）。**玩家看不到与自己同色的障碍物**——而撞上同色障碍物恰恰就是唯一的死亡方式。也就是说，致命障碍对玩家而言是「隐形」的，必须依靠其他玩家（他们能看到你的颜色）的提醒来躲避。
+
+游戏为服务器权威（Server-authoritative）架构：所有规则判定在服务端完成，客户端只负责发送输入和渲染服务端投影后的可见数据。
 
 ### 核心玩法
 
-- **颜色可见性机制**：每个玩家只能看到特定颜色的障碍物
-- **多人协作**：玩家需要互相提醒看不见的障碍物
-- **生存挑战**：避开障碍物，尽可能生存更长距离
-- **实时同步**：所有玩家状态实时同步，支持观战模式
+- **颜色盲区机制**：玩家看不到自己颜色的障碍物，只能看到其他颜色的障碍物
+- **多人协作**：其他玩家能看到你看不见的障碍物，需要靠沟通/提醒生存
+- **三路线跑酷**：玩家在 3 条纵向车道间左右切换，躲避滚动而来的障碍物
+- **生存挑战**：世界以恒定速度滚动，尽可能活得久、跑得远
+- **实时同步**：服务端定时广播可见状态；死亡后进入观战视角
+- **危险提示**：当自己颜色的（不可见）障碍物逼近时，屏幕出现危险预警
 
 ## 技术架构
 
 ### 前端技术栈
-- **TypeScript** - 类型安全的 JavaScript
-- **Canvas API** - 高性能 2D 渲染
+
+- **TypeScript** - 类型安全
+- **Canvas 2D API** - 游戏画面渲染（固定内部分辨率 1280×720，通过 CSS 缩放适配屏幕）
 - **WebSocket** - 实时双向通信
-- **响应式设计** - 支持桌面端和移动端
+- **响应式设计** - 移动端适配、横竖屏切换
 
 ### 后端技术栈
-- **Node.js** - 服务器运行时
-- **WebSocket (ws)** - WebSocket 服务器
+
+- **Node.js** - 服务器运行时（同时承担 HTTP 静态文件服务与 WebSocket 服务）
+- **ws** - WebSocket 服务器
 - **TypeScript** - 服务端类型安全
 
 ### 项目结构
 
 ```
-src/
-├── shared/           # 共享类型和常量
-│   ├── types.ts      # 游戏数据类型定义
-│   ├── messages.ts   # 客户端-服务端消息协议
-│   └── constants.ts  # 游戏配置常量
-├── server/           # 服务端代码
-│   ├── index.ts      # 服务器入口和 HTTP/WebSocket 处理
-│   ├── room-manager.ts        # 房间管理
-│   ├── game-loop.ts          # 游戏主循环
-│   ├── player-logic.ts       # 玩家逻辑处理
-│   ├── obstacle-generator.ts # 障碍物生成
-│   ├── collision-detector.ts # 碰撞检测
-│   ├── visibility-filter.ts  # 可见性过滤
-│   └── seeded-random.ts      # 可复现随机数
-└── client/           # 客户端代码
-    ├── index.ts              # 客户端入口
-    ├── websocket-client.ts   # WebSocket 客户端
-    ├── input-handler.ts      # 键盘输入处理
-    ├── touch-handler.ts      # 触控输入处理
-    ├── input-merger.ts       # 输入合并器
-    ├── canvas-renderer.ts    # Canvas 渲染器
-    ├── viewport-manager.ts   # 视口管理
-    └── status-bar-renderer.ts # 状态栏渲染
+blind-line-game/
+├── public/
+│   └── index.html              # 游戏页面（含状态栏 DOM 与样式）
+├── src/
+│   ├── shared/                 # 前后端共享
+│   │   ├── types.ts            # 玩家/障碍物/房间/可见状态类型，颜色枚举
+│   │   ├── messages.ts         # 客户端-服务端消息协议与解析工具
+│   │   └── constants.ts        # 游戏配置常量（网格、速度、端口等）
+│   ├── server/                 # 服务端
+│   │   ├── index.ts            # 入口：HTTP 静态服务 + WebSocket + 房间/游戏循环编排
+│   │   ├── room-manager.ts     # 房间创建/加入/离开、颜色分配、准备与开局
+│   │   ├── game-loop.ts        # 固定步长主循环：世界滚动、障碍物、碰撞、结算
+│   │   ├── obstacle-generator.ts # 基于种子随机数的障碍物生成
+│   │   ├── collision-detector.ts # 同色同路线碰撞检测
+│   │   ├── visibility-filter.ts  # 按玩家颜色过滤障碍物、生成危险提示
+│   │   ├── player-logic.ts     # 路线切换边界逻辑
+│   │   ├── seeded-random.ts    # Mulberry32 可复现随机数
+│   │   └── collision-detector.test.ts # 碰撞检测单元测试
+│   └── client/                 # 客户端
+│       ├── index.ts            # 入口：编排渲染、输入、网络与状态栏
+│       ├── websocket-client.ts # WebSocket 连接与消息收发
+│       ├── input-handler.ts    # 键盘输入（方向键 / WASD）
+│       ├── touch-handler.ts    # 触控滑动输入
+│       ├── touch-feedback.ts   # 触控视觉反馈（波纹 + 方向指示）
+│       ├── input-merger.ts     # 键盘与触控输入合并
+│       ├── input-merger.test.ts# 输入合并单元测试
+│       ├── canvas-renderer.ts  # Canvas 渲染（路径、障碍物、距离、遮罩）
+│       ├── viewport-manager.ts # 视口/尺寸/设备适配
+│       └── status-bar-renderer.ts # 状态栏 DOM 渲染（统计、最佳成绩）
+├── dist/                       # TypeScript 编译输出（服务器实际加载此处）
+├── verify-input-merger.js      # 输入合并逻辑的独立验证脚本
+├── tsconfig.json
+└── package.json
 ```
 
-## 颜色可见性规则
+## 游戏规则
 
-### 玩家颜色与可见障碍物
+### 颜色可见性规则（核心）
 
-| 玩家颜色 | 可见障碍物颜色 |
-|---------|---------------|
-| 红色 (RED) | 红色、黄色、品红、白色 |
-| 绿色 (GREEN) | 绿色、黄色、青色、白色 |
-| 蓝色 (BLUE) | 蓝色、青色、品红、白色 |
-| 黄色 (YELLOW) | 黄色、白色 |
+障碍物颜色从**本局玩家颜色集合**中随机选取。每位玩家：
 
-### 障碍物颜色说明
+| 玩家颜色 | 不可见（且致命）障碍物 | 可见障碍物 |
+|---------|----------------------|-----------|
+| 红色 (RED) | 红色 | 其他玩家颜色的全部障碍物 |
+| 绿色 (GREEN) | 绿色 | 其他玩家颜色的全部障碍物 |
+| 蓝色 (BLUE) | 蓝色 | 其他玩家颜色的全部障碍物 |
+| 黄色 (YELLOW) | 黄色 | 其他玩家颜色的全部障碍物 |
 
-- **基础颜色** (RED/GREEN/BLUE)：只有对应颜色玩家可见
-- **混合颜色** (YELLOW/CYAN/MAGENTA)：两种基础颜色玩家可见
-- **白色** (WHITE)：所有玩家都可见
+过滤逻辑实现于 [visibility-filter.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/visibility-filter.ts)：`filterObstacles()` 直接排除与玩家自身颜色相同的障碍物。
+
+### 碰撞与死亡
+
+只有同时满足以下三个条件才会死亡（见 [collision-detector.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/collision-detector.ts)）：
+
+1. 障碍物颜色与玩家颜色**相同**（即玩家看不见的那个颜色）
+2. 障碍物与玩家位于**同一条路线**（列）
+3. 纵向位置重叠（容差 0.5 个网格单位）
+
+即「看得见的都撞不死，撞得死的都看不见」。
+
+### 危险提示（Proximity Hint）
+
+当自己颜色的障碍物距离玩家 3 个网格行以内时，服务端会下发提示（含所在路线与强度 0~1）。客户端据此将游戏区域边框变红加粗，作为「看不见的威胁正在逼近」的唯一预警。实现见 [visibility-filter.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/visibility-filter.ts) 与 [canvas-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/canvas-renderer.ts)。
 
 ## 游戏功能特性
 
-### 多人房间系统
-- 支持 2-4 人同时游戏
-- 自动房间匹配或指定房间加入
-- 玩家准备机制和倒计时开始
+### 房间系统
+
+- 支持 **2~4 人**同局（`MIN_PLAYERS = 2`，`MAX_PLAYERS = 4`）
+- 自动匹配未满房间，否则创建新房间；也可通过消息指定 `roomId` 加入
+- 颜色按加入顺序依次分配：**红 → 蓝 → 黄 → 绿**
+- 准备机制：所有玩家准备且人数达标后，进入 **3 秒倒计时**再开局
+- 游戏进行中掉线视为死亡，并广播 `PLAYER_DIED`（`killedBy: 'disconnect'`）
 
 ### 输入系统
-- **键盘控制**：方向键或 WASD 移动
-- **触控支持**：移动端触摸操作
-- **输入合并**：键盘和触控输入智能合并
-- **准备操作**：空格键或点击屏幕准备
+
+- **键盘**：[input-handler.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/input-handler.ts) 监听方向键与 WASD；服务端实际只消费左右方向（路线切换），上下键当前不产生位移
+- **触控**：[touch-handler.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/touch-handler.ts) 识别左右滑动手势（最小距离 30px、最长 300ms、50ms 防抖），垂直滑动默认关闭
+- **输入合并**：[input-merger.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/input-merger.ts) 对键盘与触控做逻辑或（OR）合并，仅在合并结果变化时才发送，避免重复消息
+- **准备 / 重开**：空格键、点击画布或触摸画布
 
 ### 渲染系统
-- **高性能 Canvas 渲染**：60fps 流畅游戏体验
-- **响应式布局**：自适应不同屏幕尺寸
-- **视口管理**：智能视口缩放和居中
-- **状态栏信息**：实时显示游戏统计
+
+渲染器固定在 1280×720 内部分辨率上绘制，实际显示尺寸由 CSS 缩放，保证逻辑与视觉一致。
+
+- 玩家固定在屏幕底部，世界向上滚动、障碍物自上而下迎面而来
+- 绘制玩家走过的完整路径轨迹（按玩家颜色着色）
+- 左上角实时显示距离
+- 依次渲染：等待 / 倒计时 / 进行中 / 游戏结束四种画面
+- 情绪化反馈：危险时边框变红、死亡时叠加红色遮罩并提示「你已死亡 / 观看其他玩家...」
+
+### 状态栏
+
+[status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) 以 DOM 形式渲染：
+
+- 等待/倒计时：房间号、自身颜色、玩家数、倒计时
+- 进行中：距离（m）、存活时间、死亡状态标记
+- 结束：最终距离、存活时间、移动次数、个人最佳对比（新纪录提示）
+- 个人最佳存储于 `localStorage` 的 `colorBlindRunner_personalBest`
 
 ### 网络同步
-- **服务器权威**：所有游戏逻辑在服务器执行
-- **实时状态同步**：30fps 状态广播
-- **个性化视图**：每个玩家接收过滤后的可见状态
-- **观战模式**：死亡玩家可继续观看游戏
+
+- **服务器权威**：世界滚动、障碍物生成、碰撞判定全部在服务端
+- 客户端只发送 `PLAYER_INPUT`，不修改世界状态、不做碰撞判定
+- 状态广播中，每个玩家的障碍物列表按其颜色单独过滤
+- 死亡玩家仍持续收到状态更新，并以自己死亡时的距离作为视角位置，实现观战
+
+### 移动端适配
+
+[viewport-manager.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/viewport-manager.ts) 负责：
+
+- 动态写入 `viewport` meta（禁用缩放、`viewport-fit=cover`）
+- 竖屏移动端画布占屏高约 80%，其余场景按 16:9 适配并预留状态栏空间
+- 通过 `ResizeObserver` 与 `orientationchange` 监听尺寸/方向变化并重新布局
+- 屏蔽双击缩放与手势缩放
+
+## 关键配置
+
+来源：[constants.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/shared/constants.ts) 与 [game-loop.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/game-loop.ts)。
+
+| 配置项 | 值 | 说明 |
+|-------|-----|------|
+| `GRID_COLS` | 3 | 路线（车道）数量 |
+| `GRID_ROWS` | 12 | 可见网格行数 |
+| `CELL_SIZE` | 60 | 单元格像素尺寸 |
+| `GAME_WIDTH` / `GAME_HEIGHT` | 1280 / 720 | 游戏区域尺寸（16:9） |
+| `GAME_AREA_OFFSET` | 550 | 3 列居中后的左侧偏移 |
+| `MIN_PLAYERS` / `MAX_PLAYERS` | 2 / 4 | 房间人数范围 |
+| `COUNTDOWN_SECONDS` | 3 | 开局倒计时 |
+| `DEFAULT_PORT` | 8000 | 服务端端口（可用环境变量 `PORT` 覆盖） |
+| `TICK_RATE` | 60 | 逻辑帧率（Hz） |
+| `WORLD_SPEED` | 3 | 世界滚动速度（网格行/秒） |
+| `BROADCAST_RATE` | 20 | 状态广播频率（Hz） |
+| `SPAWN_DISTANCE` | 10 | 障碍物提前生成距离（行） |
+| `OBSTACLE_MIN_GAP` | 2 | 障碍物最小间隔（行），实际间隔 3~4 行 |
+| `PROXIMITY_HINT_DISTANCE` | 3 | 危险提示触发距离（行） |
 
 ## 开发和部署
 
 ### 环境要求
+
 - Node.js 18+
 - TypeScript 5.0+
-- 现代浏览器（支持 WebSocket 和 Canvas）
+- 现代浏览器（需支持 WebSocket、Canvas、ES Module）
 
-### 开发命令
+### 常用命令
 
 ```bash
 # 安装依赖
 npm install
 
-# 编译 TypeScript
+# 编译 TypeScript 到 dist/
 npm run build
 
-# 启动服务器（生产模式）
+# 启动服务器（运行编译产物）
 npm run start:server
 
-# 启动开发服务器
+# 开发模式启动（tsx 直接运行 TS 源码）
 npm run dev:server
 
-# 运行测试
+# 运行测试（vitest）
 npm test
 
 # 监听模式测试
 npm run test:watch
 ```
 
-### 服务器配置
+### 本地访问
 
-默认配置：
-- **端口**：8000
-- **游戏区域**：1280x720 (16:9)
-- **网格**：3列 x 12行
-- **刷新率**：60fps 游戏逻辑，30fps 状态同步
+`npm run start:server` 后访问 `http://localhost:8000`，服务器会：
+
+- 对 `/` 与 `/index.html` 返回 [public/index.html](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/public/index.html)
+- 对 `/dist/*` 返回编译后的客户端脚本
+- 同一端口提供 WebSocket 服务
+
+多人测试时用多个浏览器窗口（或标签页）打开同一地址即可自动匹配进同一房间。
 
 ### 部署说明
 
-1. **开发环境**：直接连接 Node.js 服务器 (ws://localhost:8000)
-2. **生产环境**：通过反向代理支持 HTTPS (wss://)
-3. **服务器参数**：可通过 URL 参数 `?server=IP地址` 指定服务器
+1. **开发环境**：页面通过 `ws://<host>:8000` 直连 Node 服务器
+2. **生产环境**：建议用反向代理提供 HTTPS，客户端在 `https:` 下会自动改用 `wss://`（不再附带端口）
+3. **指定服务器**：可通过 URL 参数覆盖连接地址，如 `?server=192.168.1.100`
+4. **端口**：默认 8000，可通过环境变量 `PORT` 修改
 
-## 测试覆盖
+## 测试
 
-项目包含核心功能的测试套件：
+使用 Vitest，当前测试覆盖两个核心模块：
 
-- **单元测试**：核心逻辑组件测试
-- **碰撞检测测试**：游戏物理逻辑验证
-- **输入处理测试**：键盘和触控输入合并逻辑验证
+- [collision-detector.test.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/collision-detector.test.ts) - 同色同路线碰撞、异色不碰撞、异路线不碰撞、死亡玩家不参与判定、位置不重叠等 7 个用例
+- [input-merger.test.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/input-merger.test.ts) - 键盘/触控输入处理、OR 合并、变化时才发送、状态重置与调试信息
 
-### 测试文件
-- `collision-detector.test.ts` - 碰撞检测逻辑测试
-- `input-merger.test.ts` - 输入合并功能测试
+此外根目录的 [verify-input-merger.js](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/verify-input-merger.js) 是一个可在 Node 中直接运行的输入合并逻辑验证脚本（自带简化的 Mock 实现）。
 
-## 代码规范
+## 代码规范与架构原则
 
 ### TypeScript 风格
-- 严格类型检查
-- 明确的接口定义
-- 中文注释说明
-- 语义清晰的变量命名
+
+- 严格类型检查（`strict: true`）
+- 接口、类型与核心结构均有中文注释说明
+- 语义清晰的命名；类型/接口 PascalCase，变量/函数 camelCase，常量 UPPER_SNAKE_CASE
 
 ### 架构原则
-- **服务器权威**：所有游戏状态由服务器管理
-- **客户端只读**：客户端只发送输入，不修改游戏状态
-- **模块分离**：渲染、逻辑、网络各自独立
-- **可复现性**：使用种子随机数确保游戏可重现
+
+- **服务器权威**：世界状态与全部规则判定在服务端
+- **客户端只读**：客户端只发送输入，不修改游戏状态、不做碰撞判定
+- **渲染与逻辑分离**：渲染层只读取投影后的可见数据
+- **可复现性**：障碍物由种子随机数（Mulberry32）生成，随机参数集中管理
+- **模块分离**：共享协议、服务端逻辑、客户端渲染/输入/网络各自独立
+
+## 已知实现细节与遗留项
+
+以下为阅读源码时发现的、与文档/命名不完全一致之处，当前行为以代码为准：
+
+- `shared/types.ts` 中的 `COLOR_VISIBILITY` 常量（红/绿/蓝各可见 4 色）**未被任何逻辑使用**，实际规则是排除自身颜色
+- `ObstacleColor` 定义了 `CYAN` / `MAGENTA` / `WHITE` 混合色，但生成器只从玩家颜色中取色，因此混合色障碍物当前不会出现
+- `GAME_CONFIG.STATE_BROADCAST_RATE = 30` 与实际使用的 `GAME_LOOP_CONFIG.BROADCAST_RATE = 20` 不一致，后者才是生效值
+- `INITIAL_SCROLL_SPEED` / `MAX_SCROLL_SPEED` / `SCROLL_ACCELERATION` 未被主循环使用，滚动速度恒为 `WORLD_SPEED = 3`；广播中的 `scrollSpeed` 为固定值 `100`
+- `HEARTBEAT_INTERVAL` / `CONNECTION_TIMEOUT` 已定义，但客户端未启动心跳定时器
+- 存在两套并行的 `GameState` 枚举（`shared/types.ts` 与 `game-loop.ts`，以及 `visibility-filter.ts`），通过转换函数映射
+- `input-merger` 中累计的移动次数仅在游戏结束界面展示
 
 ## 许可证
 
