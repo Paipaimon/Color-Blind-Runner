@@ -61,12 +61,16 @@ export declare class StatusBarRenderer {
     private layout;
     /** 自身颜色（由 render 传入并记忆，供结束态复用） */
     private myPlayerColor;
-    /** 上一次已知的房间人数（等待阶段服务端不下发玩家列表时沿用） */
-    private lastKnownPlayerCount;
+    /** 房间花名册：在线与已准备人数（由 updateRoster 从服务端广播维护） */
+    private onlineIds;
+    private readyIds;
     /** DOM 数据槽缓存 */
+    private rootSection;
     private roomChip;
     private pipsWrap;
-    private countBadge;
+    private onlineValue;
+    private readyValue;
+    private playingValue;
     private colorDot;
     private colorValue;
     private statePill;
@@ -102,6 +106,19 @@ export declare class StatusBarRenderer {
      */
     private adjustLayoutForDevice;
     /**
+     * 更新房间花名册（在线人数 / 已准备人数）
+     * 数据来自服务端广播（ROOM_JOINED / PLAYER_JOINED / PLAYER_LEFT）与本地准备动作，
+     * 仅用于界面呈现，不参与任何规则判定。
+     *
+     * @param onlineIds 当前在线玩家ID
+     * @param readyIds 当前已准备玩家ID
+     */
+    updateRoster(onlineIds: Iterable<string>, readyIds: Iterable<string>): void;
+    /** 在线人数 */
+    private get onlineCount();
+    /** 已准备人数（只统计仍在线的玩家） */
+    private get readyCount();
+    /**
      * 主渲染方法
      * Requirements: 3.1, 3.2, 3.3 - 显示游戏状态、死亡信息
      */
@@ -120,12 +137,8 @@ export declare class StatusBarRenderer {
      */
     private createResultSection;
     /**
-     * 解析当前房间人数
-     * 大厅等待阶段服务端不下发玩家列表，此时沿用上一次已知人数，避免回落到 0。
-     */
-    private resolvePlayerCount;
-    /**
-     * 更新基础信息区（房间号 / 玩家数 / 自身颜色）
+     * 更新基础信息区（房间号 / 在线人数 / 已准备人数 / 游玩人数）
+     * 用最少的数字回答"现在有几个人、准备了多少、几人在玩"。
      */
     private updateBasicInfo;
     /**

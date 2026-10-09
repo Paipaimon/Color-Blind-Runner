@@ -124,19 +124,37 @@ blind-line-game/
 渲染器固定在 1280×720 逻辑坐标系上绘制（画布内部分辨率会按显示尺寸与像素比同步，保证清晰度），实际显示尺寸由 CSS 按 16:9 缩放。
 
 - 玩家固定在屏幕底部，世界向上滚动、障碍物自上而下迎面而来
-- 玩家表现为底部车道上的圆角光块，并绘制走过的完整路径轨迹（按玩家颜色着色）
-- 右侧留白处实时显示距离；三条车道有边框、分隔线与滚动网格作为运动参照
+- 玩家表现为一条**按自身颜色着色的线**（换道处形成带辉光的折角），并向屏幕下方延伸出走过的轨迹
+- 车道网格跟随世界滚动：横线与障碍物同速同向（整数世界行即格子中心，障碍物正好落在格子里），
+  竖线随玩家横向移动平移半格，使格子保持正方形并与车道中心对齐
+- 右侧留白处实时显示距离；三条车道有边框与分隔线
 - 依次渲染：等待 / 倒计时 / 进行中 / 游戏结束四种画面
 - 情绪化反馈：危险时车道边框转为警示色并随强度增强、死亡时叠加红色遮罩并提示「你已死亡 / 正在观战 / 最终距离」
 
+### 画面流畅度（帧率）
+
+服务端以 20Hz 广播状态，如果直接按广播重绘，画面每秒只会动 20 次。客户端为此做了一层**纯视觉**的平滑处理：
+
+| 手段 | 说明 |
+|------|------|
+| 广播间推帧 | 由相邻两次广播的位置差估算世界速度，在两个广播之间按显示刷新率（通常 60Hz）外推**取景位置**，每收到广播即与服务端权威位置对齐；外推值永不超过服务端最新位置 |
+| 静态画面不重绘 | 等待 / 倒计时 / 结束画面完全静态，不启动推帧循环；`requestAnimationFrame` 循环仅在 `PLAYING` 期间运行 |
+| 绘制开销 | 背景与遮罩渐变创建一次后缓存复用，避免每帧重建 `CanvasGradient` |
+| 过渡帧不做重复工作 | 推帧时不重复写入状态栏、按钮等 DOM，这些只在收到广播时更新一次 |
+
+推帧只影响"世界坐标 → 屏幕坐标"的取景换算，**不修改任何游戏数据、不做碰撞判定、不预测输入结果**，服务器权威性不受影响。
+
 ### 状态栏
 
-[status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) 以 DOM 形式渲染，按数据槽增量更新：
+[status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) 以 DOM 形式渲染，按数据槽增量更新，并按阶段切换信息层级：
 
-- 等待/倒计时：房间号、自身颜色、玩家占用、状态胶囊（等待玩家 / 倒计时 N）
-- 进行中：距离（m）、存活时间、自身状态（进行中 / 已死亡 · 观战中）
-- 结束：最终距离、存活时间、移动次数、个人最佳对比（新纪录提示）
-- 个人最佳存储于 `localStorage` 的 `colorBlindRunner_personalBest`
+| 阶段 | 呈现内容 |
+|------|---------|
+| 等待 / 倒计时 | 在线人数（含占用点位）、已准备人数、房间号、状态胶囊（等待玩家 / 可准备 / 即将开始 / 倒计时 N） |
+| 进行中 | 自身颜色、游玩人数、距离、存活时间、状态胶囊（进行中 / 已死亡 · 观战） |
+| 结束 | 最终距离、存活时间、移动次数、个人最佳对比（新纪录提示） |
+
+个人最佳存储于 `localStorage` 的 `colorBlindRunner_personalBest`。
 
 ### 界面层（UI 重构后）
 
@@ -145,18 +163,20 @@ blind-line-game/
 | 区域 | 承载内容 | 实现 |
 |------|---------|------|
 | 顶部品牌栏 | 四色标识 + 连接状态灯（连接中 / 已连接 / 连接已断开） | `public/index.html` + [index.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/index.ts) |
-| 状态栏 HUD | 房间号、玩家占用、自身颜色、状态胶囊；对局中追加距离与存活时间；结束态追加最终成绩与个人最佳对比 | [status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) |
+| 状态栏 HUD | 大厅：在线人数、已准备人数、房间号、状态胶囊；对局中：游玩人数、距离、存活时间、自身颜色；结束：最终成绩与个人最佳对比 | [status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) |
 | 游戏舞台 | 1280×720 画布，按 16:9 自适应舞台 | [canvas-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/canvas-renderer.ts) |
 | 底部操作区 | 主操作按钮（准备 / 已准备 / 倒计时 / 游戏进行中 / 重新开始）+ 按键提示 | [index.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/index.ts) |
 
-界面样张见 [docs/ui](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/docs/ui)：`lobby-desktop.png`、`lobby-mobile.png`、`state-playing.png`、`state-danger.png`、`state-dead.png`。
+界面样张见 [docs/ui](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/docs/ui)：`lobby-desktop.png`、`lobby-mobile.png`、`hud-playing.png`、`state-playing.png`、`state-danger.png`、`state-dead.png`。
 
 设计要点：
 
+- **只回答一个问题**：状态栏按阶段只呈现当下最关心的数字——大厅看"几个人、几个准备了"，对局看"几个人在玩、跑了多远、活了多久"，房间号在对局中自动让位
+- **人数来源**：在线/已准备人数由服务端广播（`ROOM_JOINED` / `PLAYER_JOINED` / `PLAYER_LEFT`）加本机准备动作在客户端聚合，仅用于展示，不参与任何判定
 - **状态可读性**：状态栏不再每帧重建 DOM，改为构造时建立数据槽、渲染时增量写入文本与类名，避免样式抖动
 - **危险提示**：自己颜色的障碍物逼近时，车道边框转为警示色并随强度增强（唯一的危险反馈，不含方向引导）
 - **颜色即信息**：四种玩家颜色在 UI 与画布中一致，且不额外标注障碍物信息，避免削弱"颜色盲区"这一核心机制
-- **移动端**：竖屏时状态栏改为纵向堆叠，画布按屏幕高度的 80% 推导；横屏矮屏时隐藏品牌栏与提示以保住画面高度
+- **移动端**：竖屏时状态栏改为纵向堆叠，画布按舞台实测尺寸推导；横屏矮屏时隐藏品牌栏与提示以保住画面高度
 - **可访问性**：主操作为原生 `button`（支持键盘聚焦与回车触发），空格 / 回车与点击画布同样可触发准备与重开
 
 ### 网络同步
@@ -259,9 +279,19 @@ node scripts/debug/cdp-shot.cjs shot.png 15000 PLAYING
 | 参数 | 作用 |
 |------|------|
 | `?debug=layout` | 在 DOM 中写入关键元素实测尺寸，便于核验响应式布局 |
-| `?debug=state&scene=playing` | 用真实渲染器离线渲染单个对局画面（可选 `waiting` / `countdown` / `playing` / `danger` / `dead` / `gameover`） |
+| `?debug=state&scene=playing` | 用真实渲染器离线渲染单个对局画面（可选 `waiting` / `countdown` / `playing` / `path` / `danger` / `dead` / `gameover`） |
+| `?debug=hud&phase=playing` | 用真实状态栏渲染器输出指定阶段的状态栏（可选 `idle` / `playing` / `finished`） |
+| `?debug=perf&frames=180` | 连续绘制对局画面并统计单帧耗时（结果写入 `#perfProbe`），用于核验帧率余量 |
 | `?autoplay=1` | 加入房间后自动准备，便于无头环境验证进行中界面 |
 | `?server=<host>` | 指定 WebSocket 服务器地址 |
+
+当前实测（无头 Edge、1280×720、24 个障碍物、180 帧同步绘制）：
+
+```
+avg 0.102ms / median 0.100ms / p95 0.200ms / max 4ms（首帧建渐变）   60fps 预算 16.67ms
+```
+
+即单帧绘制只占 60fps 预算的约 0.6%，**帧率瓶颈不在绘制，而在服务端 20Hz 的状态广播**，因此平滑方案放在客户端推帧上。
 
 ### 本地访问
 

@@ -2,13 +2,15 @@
  * 调试辅助脚本（不参与构建与游戏运行）
  * 作用：向本地服务器投放 N 个「脚本玩家」并全部准备，让房间凑够人数自动开局，
  *      便于用无头浏览器截图核验游戏进行中的 UI。
- * 用法：node .markdown-collab/drive-players.js [玩家数] [存活毫秒]
+ * 用法：node .markdown-collab/drive-players.js [玩家数] [存活毫秒] [readyDelayMs]
+ *   - readyDelayMs 传 -1 表示不自动准备（用于停留在等待阶段核验大厅 UI）
  */
 
 const { WebSocket } = require('ws');
 
 const PLAYER_COUNT = Number(process.argv[2] || 2);
 const ALIVE_MS = Number(process.argv[3] || 20000);
+const READY_DELAY = process.argv[4] !== undefined ? Number(process.argv[4]) : null;
 const URL = process.env.WS_URL || 'ws://localhost:8000';
 
 const sockets = [];
@@ -32,8 +34,11 @@ function createPlayer(index) {
 
       if (msg.type === 'ROOM_JOINED') {
         console.log(`[player${index}] 加入房间 ${msg.roomId} 颜色 ${msg.playerColor}`);
-        // 稍等片刻，等浏览器端也进入房间后再准备
-        setTimeout(() => ws.send(JSON.stringify({ type: 'READY' })), 1500 + index * 120);
+        // 稍等片刻，等浏览器端也进入房间后再准备；READY_DELAY < 0 表示只占位不准备
+        const delay = READY_DELAY === null ? 1500 + index * 120 : READY_DELAY;
+        if (delay >= 0) {
+          setTimeout(() => ws.send(JSON.stringify({ type: 'READY' })), delay);
+        }
         resolve();
       }
 

@@ -28,30 +28,42 @@ export declare class CanvasRenderer {
     private isDanger;
     private dangerIntensity;
     private scrollWorldY;
+    private cachedBackground;
+    private cachedVeil;
     init(canvas: HTMLCanvasElement): void;
     setMyPlayer(playerId: string, color: PlayerColor): void;
     resetAll(): void;
-    render(state: VisibleState): void;
+    /**
+     * 渲染一帧
+     *
+     * @param state 服务端投影后的可见状态（唯一数据来源，不做任何修改）
+     * @param worldYOverride 可选的世界位置覆盖值：仅用于在两帧广播之间做视觉插值，
+     *        使画面以显示器刷新率（60Hz+）平滑推进，而不必等待 20Hz 的状态广播。
+     *        不传时按状态自身的坐标渲染（离散更新路径）。
+     */
+    render(state: VisibleState, worldYOverride?: number): void;
     /**
      * 绘制舞台：背景、车道、网格与边框
      */
     clear(): void;
     /**
      * 横向滚动网格线
-     * 使用与障碍物相同的世界滚动换算，因此不需要额外状态
+     * 玩家在车道内横向移动时，格子整体跟着平移半格，使格子中心与玩家/障碍物中心对齐；
+     * 纵向按世界坐标换算，因此与障碍物同速同向向下流动，每个障碍物都落在格子里。
      */
     private renderScrollGrid;
-    /** 当前世界滚动位置（用于网格滚动，纯视觉） */
     /**
      * 渲染游戏区域边框
      * 靠近障碍物时边框转为警示色
      */
     private renderBoundary;
-    private renderGame;
     /**
-     * 渲染玩家本体：底部车道上的圆角光块
+     * 渲染进行中的画面
+     *
+     * @param state 服务端状态
+     * @param worldYOverride 可选的世界位置插值结果（仅影响取景与绘制位置，不修改任何游戏数据）
      */
-    private renderPlayer;
+    private renderGame;
     /**
      * 渲染死亡提示覆盖层
      */
@@ -96,14 +108,15 @@ export declare class CanvasRenderer {
     private renderDistance;
     /**
      * 等待画面
-     * 画布只呈现空舞台；玩家数、房间号、准备状态由 DOM 状态栏与操作按钮承载，
-     * 避免在游戏区域内叠加文字造成信息重复。
+     * 画布只呈现空舞台（车道与格子）；玩家数、准备状态由 DOM 状态栏与操作按钮承载，
+     * 避免在游戏区域内叠加文字或光标造成信息重复。
      */
     private renderWaitingScreen;
     /**
      * 倒计时画面
      */
     private renderCountdown;
+    private getVeilGradient;
     /**
      * 游戏结束画面
      */

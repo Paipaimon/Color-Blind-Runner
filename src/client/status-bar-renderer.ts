@@ -89,13 +89,17 @@ export class StatusBarRenderer {
   /** 自身颜色（由 render 传入并记忆，供结束态复用） */
   private myPlayerColor: PlayerColor | null = null;
 
-  /** 上一次已知的房间人数（等待阶段服务端不下发玩家列表时沿用） */
-  private lastKnownPlayerCount: number = 0;
+  /** 房间花名册：在线与已准备人数（由 updateRoster 从服务端广播维护） */
+  private onlineIds: Set<string> = new Set();
+  private readyIds: Set<string> = new Set();
 
   /** DOM 数据槽缓存 */
+  private rootSection: HTMLElement | null = null;
   private roomChip: HTMLElement | null = null;
   private pipsWrap: HTMLElement | null = null;
-  private countBadge: HTMLElement | null = null;
+  private onlineValue: HTMLElement | null = null;
+  private readyValue: HTMLElement | null = null;
+  private playingValue: HTMLElement | null = null;
   private colorDot: HTMLElement | null = null;
   private colorValue: HTMLElement | null = null;
   private statePill: HTMLElement | null = null;
@@ -221,6 +225,46 @@ export class StatusBarRenderer {
   }
 
   /**
+   * 更新房间花名册（在线人数 / 已准备人数）
+   * 数据来自服务端广播（ROOM_JOINED / PLAYER_JOINED / PLAYER_LEFT）与本地准备动作，
+   * 仅用于界面呈现，不参与任何规则判定。
+   *
+   * @param onlineIds 当前在线玩家ID
+   * @param readyIds 当前已准备玩家ID
+   */
+  updateRoster(onlineIds: Iterable<string>, readyIds: Iterable<string>): void {
+    this.onlineIds = new Set(onlineIds);
+    this.readyIds = new Set(readyIds);
+
+    if (this.onlineValue) {
+      this.setText(this.onlineValue, `${this.onlineCount}/${GAME_CONFIG.MAX_PLAYERS}`);
+    }
+    if (this.readyValue) {
+      this.setText(this.readyValue, `${this.readyCount}/${GAME_CONFIG.MAX_PLAYERS}`);
+    }
+    if (this.pipsWrap) {
+      const pips = this.pipsWrap.children;
+      for (let i = 0; i < pips.length; i++) {
+        (pips[i] as HTMLElement).classList.toggle('filled', i < this.onlineCount);
+      }
+    }
+  }
+
+  /** 在线人数 */
+  private get onlineCount(): number {
+    return this.onlineIds.size;
+  }
+
+  /** 已准备人数（只统计仍在线的玩家） */
+  private get readyCount(): number {
+    let count = 0;
+    for (const id of this.readyIds) {
+      if (this.onlineIds.has(id)) count++;
+    }
+    return count;
+  }
+
+  /**
    * 主渲染方法
    * Requirements: 3.1, 3.2, 3.3 - 显示游戏状态、死亡信息
    */
@@ -232,7 +276,7 @@ export class StatusBarRenderer {
     // 更新游戏统计数据
     this.updateGameStatsFromState(state, playerId);
 
-    // 选择布局模式并确保骨架结构匹配
+    // 等待/倒计时统一按大厅态呈现
     const targetLayout: BarLayout =
       state.gameState === GameState.PLAYING ? 'playing'
         : state.gameState === GameState.GAME_OVER ? 'finished'
@@ -240,8 +284,8 @@ export class StatusBarRenderer {
 
     this.applyLayout(targetLayout);
 
-    // 基础信息区
-    this.updateBasicInfo(roomId, playerColor, this.resolvePlayerCount(state));
+    // 基础信息区（房间号 / 在线人数 / 已准备人数 / 游玩人数）
+    this.updateBasicInfo(roomId, playerColor, state.players.length);
 
     // 状态胶囊
     this.updateStatePill(state, playerId);
@@ -270,83 +314,77 @@ export class StatusBarRenderer {
     this.layout = layout;
     this.clearSlotCache();
 
-    const basicInfo = document.createElement('div');
-    basicInfo.className = 'status-section basic-info';
+    // —— 左：当前阶段最关心的一个数值 ——
+    const statsSection = document.createElement('div');
+    statsSection.className = 'status-section game-stats';
 
-    // 房间号
-    const roomItem = document.createElement('div');
-    roomItem.className = 'status-item secondary-info';
-    const roomChip = document.createElement('span');
-    roomChip.className = 'room-chip';
-    roomChip.textContent = '——';
-    roomItem.appendChild(roomChip);
-    basicInfo.appendChild(roomItem);
-    this.roomChip = roomChip;
+    if (layout === 'idle') {
+      // 人数用圆点表示占用，避免与"已准备"混淆
+      const onlineItem = document.createElement('div');
+      onlineItem.className = 'status-item';
+      onlineItem.dataset.slot = 'online-count';
 
-    // 玩家占用
-    const playersItem = document.createElement('div');
-    playersItem.className = 'status-item secondary-info';
-    const playersLabel = document.createElement('span');
-    playersLabel.className = 'status-label';
-    playersLabel.textContent = '玩家';
-    const pipsWrap = document.createElement('span');
-    pipsWrap.className = 'player-pips';
-    for (let i = 0; i < GAME_CONFIG.MAX_PLAYERS; i++) {
-      pipsWrap.appendChild(document.createElement('i'));
+      const onlineLabel = document.createElement('span');
+      onlineLabel.className = 'status-label';
+      onlineLabel.textContent = '在线人数';
+
+      const pipsWrap = document.createElement('span');
+      pipsWrap.className = 'player-pips';
+      for (let i = 0; i < GAME_CONFIG.MAX_PLAYERS; i++) {
+        pipsWrap.appendChild(document.createElement('i'));
+      }
+
+      const onlineValue = document.createElement('span');
+      onlineValue.className = 'status-value mono';
+      onlineValue.dataset.slot = 'online-count-value';
+
+      onlineItem.appendChild(onlineLabel);
+      onlineItem.appendChild(pipsWrap);
+      onlineItem.appendChild(onlineValue);
+      statsSection.appendChild(onlineItem);
+
+      this.pipsWrap = pipsWrap;
+      this.onlineValue = onlineValue;
+
+      // 已准备人数
+      const readyItem = this.createValueItem('已准备', 'ready-count', 'mono');
+      readyItem.root.classList.add('ready-item');
+      statsSection.appendChild(readyItem.root);
+      this.readyValue = readyItem.value;
+    } else {
+      // 开局后：显示游玩人数与实时数值
+      const playingItem = this.createValueItem('游玩人数', 'playing-count', 'mono');
+      statsSection.appendChild(playingItem.root);
+      this.playingValue = playingItem.value;
+
+      const distanceItem = this.createValueItem('距离', 'stat-distance', 'mono lg');
+      const timeItem = this.createValueItem('时间', 'stat-time', 'mono lg');
+      statsSection.appendChild(distanceItem.root);
+      statsSection.appendChild(timeItem.root);
+      this.distanceValue = distanceItem.value;
+      this.timeValue = timeItem.value;
     }
-    const countBadge = document.createElement('span');
-    countBadge.className = 'count-badge';
-    countBadge.textContent = `0/${GAME_CONFIG.MAX_PLAYERS}`;
-    playersItem.appendChild(playersLabel);
-    playersItem.appendChild(pipsWrap);
-    playersItem.appendChild(countBadge);
-    basicInfo.appendChild(playersItem);
-    this.pipsWrap = pipsWrap;
-    this.countBadge = countBadge;
 
-    // 自身颜色
-    const colorItem = document.createElement('div');
-    colorItem.className = 'status-item color-indicator';
-    const colorLabel = document.createElement('span');
-    colorLabel.className = 'status-label';
-    colorLabel.textContent = '我的颜色';
-    const colorDot = document.createElement('span');
-    colorDot.className = 'color-dot';
-    const colorValue = document.createElement('span');
-    colorValue.className = 'status-value';
-    colorValue.textContent = '——';
-    colorItem.appendChild(colorLabel);
-    colorItem.appendChild(colorDot);
-    colorItem.appendChild(colorValue);
-    basicInfo.appendChild(colorItem);
-    this.colorDot = colorDot;
-    this.colorValue = colorValue;
+    this.statsSection = statsSection;
 
-    // 状态胶囊（放入基础信息区右侧）
+    // —— 中：房间信息（房号；对局中隐藏，改由 updateBasicInfo 决定） ——
+    const rootSection = document.createElement('div');
+    rootSection.className = 'status-section basic-info';
+    this.roomChip = null;
+
+    // —— 右：状态胶囊 ——
     const statePill = document.createElement('span');
     statePill.className = 'state-pill';
     statePill.dataset.tone = 'wait';
     statePill.textContent = '准备中';
-    basicInfo.appendChild(statePill);
-    this.statePill = statePill;
 
-    // 数值区
-    const statsSection = document.createElement('div');
-    statsSection.className = 'status-section game-stats';
-    const distanceItem = this.createValueItem('距离', 'stat-distance');
-    const timeItem = this.createValueItem('时间', 'stat-time');
-    statsSection.appendChild(distanceItem.root);
-    statsSection.appendChild(timeItem.root);
-    this.distanceValue = distanceItem.value;
-    this.timeValue = timeItem.value;
-    this.statsSection = statsSection;
-
-    // 组装：等待态只保留基础信息；游戏态补充数值区
+    // —— 组装 ——
     this.container.innerHTML = '';
-    this.container.appendChild(basicInfo);
-    if (layout !== 'idle') {
-      this.container.appendChild(statsSection);
-    }
+    this.container.appendChild(rootSection);
+    this.container.appendChild(statsSection);
+    this.container.appendChild(statePill);
+    this.rootSection = rootSection;
+    this.statePill = statePill;
 
     // 完成态：最终成绩 + 个人最佳
     if (layout === 'finished') {
@@ -399,45 +437,82 @@ export class StatusBarRenderer {
   }
 
   /**
-   * 解析当前房间人数
-   * 大厅等待阶段服务端不下发玩家列表，此时沿用上一次已知人数，避免回落到 0。
-   */
-  private resolvePlayerCount(state: VisibleState): number {
-    const count = state.players.length;
-    if (count > 0) {
-      this.lastKnownPlayerCount = count;
-      return count;
-    }
-    return this.lastKnownPlayerCount;
-  }
-
-  /**
-   * 更新基础信息区（房间号 / 玩家数 / 自身颜色）
+   * 更新基础信息区（房间号 / 在线人数 / 已准备人数 / 游玩人数）
+   * 用最少的数字回答"现在有几个人、准备了多少、几人在玩"。
    */
   private updateBasicInfo(roomId?: string, playerColor?: PlayerColor, playerCount?: number): void {
-    if (this.roomChip && roomId) {
-      this.setText(this.roomChip, roomId.substring(0, 8));
+    if (!this.rootSection) return;
+
+    // 房间号仅在大厅需要（供玩家口头约房），对局中让位给实时数值
+    if (roomId && this.layout === 'idle') {
+      if (!this.roomChip) {
+        const roomItem = document.createElement('div');
+        roomItem.className = 'status-item';
+        const chip = document.createElement('span');
+        chip.className = 'room-chip';
+        chip.dataset.slot = 'room-id';
+        chip.textContent = roomId.substring(0, 8);
+        roomItem.appendChild(chip);
+        this.rootSection.appendChild(roomItem);
+        this.roomChip = chip;
+      } else {
+        this.setText(this.roomChip, roomId.substring(0, 8));
+      }
     }
 
-    if (playerColor) {
+    // 对局中隐藏房间号，保持状态栏只呈现当前最关心的数字
+    if (this.roomChip && this.layout !== 'idle') {
+      this.roomChip.parentElement?.classList.add('hidden');
+    } else if (this.roomChip) {
+      this.roomChip.parentElement?.classList.remove('hidden');
+    }
+
+    // 数值槽各自独立更新（布局重建后槽引用会刷新）
+    if (this.onlineValue) {
+      this.setText(this.onlineValue, `${this.onlineCount}/${GAME_CONFIG.MAX_PLAYERS}`);
+    }
+    if (this.readyValue) {
+      this.setText(this.readyValue, `${this.readyCount}/${GAME_CONFIG.MAX_PLAYERS}`);
+    }
+    if (this.playingValue && playerCount !== undefined) {
+      this.setText(this.playingValue, `${playerCount}/${GAME_CONFIG.MAX_PLAYERS}`);
+    }
+
+    // 自身颜色：小圆点 + 颜色名（仅对局中展示，大厅由"我的颜色"提示承担）
+    if (playerColor && this.layout !== 'idle') {
       const colorClass = COLOR_CLASS[playerColor];
-      if (this.colorDot && !this.colorDot.classList.contains(colorClass)) {
+      if (!this.colorDot) {
+        const colorItem = document.createElement('div');
+        colorItem.className = 'status-item color-indicator compact';
+
+        const dot = document.createElement('span');
+        dot.className = `color-dot ${colorClass}`;
+
+        const value = document.createElement('span');
+        value.className = 'status-value';
+        value.dataset.slot = 'color-value';
+        value.textContent = COLOR_LABEL[playerColor];
+
+        colorItem.appendChild(dot);
+        colorItem.appendChild(value);
+        this.rootSection.appendChild(colorItem);
+
+        this.colorDot = dot;
+        this.colorValue = value;
+      } else {
         this.colorDot.className = `color-dot ${colorClass}`;
-      }
-      if (this.colorValue) {
-        this.setText(this.colorValue, COLOR_LABEL[playerColor]);
+        if (this.colorValue) {
+          this.setText(this.colorValue, COLOR_LABEL[playerColor]);
+        }
       }
     }
 
-    if (this.pipsWrap && playerCount !== undefined) {
+    // 在线人数的占用点位
+    if (this.pipsWrap) {
       const pips = this.pipsWrap.children;
       for (let i = 0; i < pips.length; i++) {
-        (pips[i] as HTMLElement).classList.toggle('filled', i < playerCount);
+        (pips[i] as HTMLElement).classList.toggle('filled', i < this.onlineCount);
       }
-    }
-
-    if (this.countBadge && playerCount !== undefined) {
-      this.setText(this.countBadge, `${playerCount}/${GAME_CONFIG.MAX_PLAYERS}`);
     }
   }
 
@@ -452,8 +527,17 @@ export class StatusBarRenderer {
 
     switch (state.gameState) {
       case GameState.WAITING:
-        text = state.players.length >= GAME_CONFIG.MIN_PLAYERS ? '等待确认' : '等待玩家';
-        tone = 'wait';
+        // 人数达标且全员准备 → 即将开始；人数达标 → 可准备；否则继续等人
+        if (this.onlineCount >= GAME_CONFIG.MIN_PLAYERS && this.readyCount >= this.onlineCount) {
+          text = '即将开始';
+          tone = 'ready';
+        } else if (this.onlineCount >= GAME_CONFIG.MIN_PLAYERS) {
+          text = '可准备';
+          tone = 'wait';
+        } else {
+          text = '等待玩家';
+          tone = 'wait';
+        }
         break;
 
       case GameState.COUNTDOWN:
@@ -464,7 +548,7 @@ export class StatusBarRenderer {
       case GameState.PLAYING: {
         const me = state.players.find(p => p.id === playerId);
         if (me && !me.isAlive) {
-          text = '已死亡 · 观战中';
+          text = '已死亡 · 观战';
           tone = 'danger';
         } else {
           text = '进行中';
@@ -500,10 +584,11 @@ export class StatusBarRenderer {
       this.setText(this.timeValue, timeText);
     }
 
+    // 存活时间动画只更新同一数值槽，避免重复查找
     if (this.resultSection) {
-      const slotDistance = this.resultSection.querySelector('[data-slot="result-distance"] .status-value');
-      const slotTime = this.resultSection.querySelector('[data-slot="result-time"] .status-value');
-      const slotMoves = this.resultSection.querySelector('[data-slot="result-moves"] .status-value');
+      const slotDistance = this.resultSection.querySelector('[data-slot="result-distance-value"]');
+      const slotTime = this.resultSection.querySelector('[data-slot="result-time-value"]');
+      const slotMoves = this.resultSection.querySelector('[data-slot="result-moves-value"]');
       if (slotDistance) this.setText(slotDistance as HTMLElement, distanceText);
       if (slotTime) this.setText(slotTime as HTMLElement, timeText);
       if (slotMoves) this.setText(slotMoves as HTMLElement, this.gameStats.totalMoves.toString());
@@ -690,12 +775,16 @@ export class StatusBarRenderer {
    */
   private clearSlotCache(): void {
     this.lastText.clear();
+    this.rootSection = null;
     this.roomChip = null;
     this.pipsWrap = null;
-    this.countBadge = null;
+    this.onlineValue = null;
+    this.readyValue = null;
+    this.playingValue = null;
     this.colorDot = null;
     this.colorValue = null;
     this.statePill = null;
+    this.statsSection = null;
     this.distanceValue = null;
     this.timeValue = null;
     this.resultSection = null;

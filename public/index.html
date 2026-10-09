@@ -48,7 +48,9 @@
       /* 字体 */
       --font-ui: system-ui, -apple-system, 'Segoe UI', 'Noto Sans SC', 'PingFang SC',
                  'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-      --font-num: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+      /* 数值字体：优先等宽（数字对齐稳定），回退到系统 UI 字体 */
+      --font-num: Consolas, 'SF Mono', 'JetBrains Mono', 'Cascadia Mono', ui-monospace,
+                  'Segoe UI', 'Microsoft YaHei', ui-sans-serif, sans-serif;
 
       /* 间距 */
       --sp-1: 4px;
@@ -245,15 +247,16 @@
        DOM 由 status-bar-renderer.ts 按数据增量更新，
        容器类名与 .status-section / .status-item 结构供 ViewportManager 复用。
        -------------------------------------------------------------------------- */
+    /* 状态栏：一行呈现「人数 → 房间号 → 状态 → 数值」，对局中只保留人数与实时数值 */
     #statusBar {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: var(--sp-2) var(--sp-3);
+      gap: var(--sp-2) var(--sp-4);
       width: 100%;
       max-width: 1280px;
       flex: 0 0 auto;
-      padding: 7px 12px;
+      padding: 7px 14px;
       border: 1px solid var(--c-hairline);
       border-radius: var(--r-md);
       background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028));
@@ -273,16 +276,17 @@
       min-width: 0;
     }
 
-    .status-section.basic-info {
-      padding-right: var(--sp-3);
-      border-right: 1px solid var(--c-hairline);
+    .status-section.game-stats {
+      gap: var(--sp-4);
     }
 
-    .status-section.game-stats,
-    .status-section.result-stats {
-      flex: 0 1 auto;
-      gap: var(--sp-4);
-      min-width: 0;
+    /* 房间号：靠右放置，对局中隐藏 */
+    .status-section.basic-info {
+      margin-left: auto;
+    }
+
+    .status-section.basic-info.hidden {
+      display: none;
     }
 
     /* 状态栏内的通用单元 */
@@ -709,7 +713,6 @@
       }
 
       .status-section { gap: var(--sp-2); }
-      .status-section.basic-info { padding-right: var(--sp-2); }
       .status-section.game-stats,
       .status-section.result-stats { gap: var(--sp-3); }
       .status-value.lg { font-size: 14px; }
@@ -730,16 +733,23 @@
       padding: 7px 10px;
     }
 
+    /* 窄屏下「人数 / 房号 / 状态」同处一行，紧凑且不溢出 */
     #statusBar.mobile-layout .status-section {
-      justify-content: space-between;
+      justify-content: flex-start;
       width: 100%;
+      gap: 6px var(--sp-3);
+    }
+
+    /* 人数与数值同处一行 */
+    #statusBar.mobile-layout .status-section.game-stats {
+      flex-wrap: wrap;
+      justify-content: space-between;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--c-hairline);
     }
 
     #statusBar.mobile-layout .status-section.basic-info {
-      padding-right: 0;
-      padding-bottom: 6px;
-      border-right: none;
-      border-bottom: 1px solid var(--c-hairline);
+      margin-left: 0;
     }
 
     #statusBar.landscape-compact {
@@ -749,8 +759,11 @@
 
     #statusBar.landscape-compact .status-section.basic-info { display: none; }
 
-    /* 游戏进行中：隐藏房间/人数等次要信息，为数值让位 */
-    #statusBar.is-playing .status-section.basic-info .secondary-info { display: none; }
+    .status-section.result-stats {
+      flex: 0 1 auto;
+      gap: var(--sp-4);
+      min-width: 0;
+    }
 
     @media (hover: none) and (pointer: coarse) {
       #gameCanvas { border-radius: var(--r-sm); }

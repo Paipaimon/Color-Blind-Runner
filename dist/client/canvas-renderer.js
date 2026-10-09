@@ -68,8 +68,11 @@ export class CanvasRenderer {
     // 危险状态（靠近障碍物）
     isDanger = false;
     dangerIntensity = 0;
-    // 当前世界滚动位置（仅用于背景网格的视觉滚动）
+    // 当前世界滚动位置（网格换算与障碍物使用同一坐标系）
     scrollWorldY = 0;
+    // 背景渐变缓存（尺寸不变时复用，避免每帧重建 CanvasGradient）
+    cachedBackground = null;
+    cachedVeil = null;
     init(canvas) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
@@ -98,7 +101,15 @@ export class CanvasRenderer {
         this.isDanger = false;
         this.dangerIntensity = 0;
     }
-    render(state) {
+    /**
+     * 渲染一帧
+     *
+     * @param state 服务端投影后的可见状态（唯一数据来源，不做任何修改）
+     * @param worldYOverride 可选的世界位置覆盖值：仅用于在两帧广播之间做视觉插值，
+     *        使画面以显示器刷新率（60Hz+）平滑推进，而不必等待 20Hz 的状态广播。
+     *        不传时按状态自身的坐标渲染（离散更新路径）。
+     */
+    render(state, worldYOverride) {
         if (!this.ctx)
             return;
         this.clear();
@@ -114,7 +125,7 @@ export class CanvasRenderer {
                 this.renderCountdown(state);
                 break;
             case GameState.PLAYING:
-                this.renderGame(state);
+                this.renderGame(state, worldYOverride);
                 break;
             case GameState.GAME_OVER:
                 this.renderGameOver();
@@ -129,11 +140,14 @@ export class CanvasRenderer {
             return;
         const gameAreaWidth = GAME_CONFIG.GRID_COLS * this.cellSize;
         const gameAreaHeight = GAME_CONFIG.GRID_ROWS * this.cellSize;
-        // 游戏区域整体背景
-        const bg = this.ctx.createLinearGradient(0, 0, 0, this.height);
-        bg.addColorStop(0, THEME.bgTop);
-        bg.addColorStop(1, THEME.bgBottom);
-        this.ctx.fillStyle = bg;
+        // 游戏区域整体背景（渐变缓存复用）
+        if (!this.cachedBackground) {
+            const bg = this.ctx.createLinearGradient(0, 0, 0, this.height);
+            bg.addColorStop(0, THEME.bgTop);
+            bg.addColorStop(1, THEME.bgBottom);
+            this.cachedBackground = bg;
+        }
+        this.ctx.fillStyle = this.cachedBackground;
         this.ctx.fillRect(0, 0, this.width, this.height);
         // 左右留白（暗角），让视线聚焦到三条车道上
         this.ctx.fillStyle = THEME.gutter;
@@ -154,7 +168,7 @@ export class CanvasRenderer {
             this.ctx.lineTo(x, this.height);
         }
         this.ctx.stroke();
-        // 危险光晕（自己颜色的障碍物逼近时）
+        // 危险光晕（自己颜色的障碍物逼近时）：透明度随强度变化，需每帧重建渐变
         if (this.isDanger) {
             const tint = this.ctx.createLinearGradient(0, 0, 0, this.height);
             const alpha = Math.min(1, 0.4 + this.dangerIntensity * 0.6);
@@ -168,24 +182,44 @@ export class CanvasRenderer {
     }
     /**
      * 横向滚动网格线
-     * 使用与障碍物相同的世界滚动换算，因此不需要额外状态
+     * 玩家在车道内横向移动时，格子整体跟着平移半格，使格子中心与玩家/障碍物中心对齐；
+     * 纵向按世界坐标换算，因此与障碍物同速同向向下流动，每个障碍物都落在格子里。
      */
     renderScrollGrid() {
         if (!this.ctx)
             return;
+        const left = this.offsetX;
+        const right = this.offsetX + GAME_CONFIG.GRID_COLS * this.cellSize;
         const playerY = this.height - this.cellSize;
-        const worldOffset = this.gameStarted ? (this.scrollWorldY % this.cellSize) : 0;
+        // 玩家列中心相对车道中心的偏移（半格），让格子随横向移动平移
+        const laneCenterCol = (GAME_CONFIG.GRID_COLS - 1) / 2;
+        const panX = (this.currentCol - laneCenterCol) * this.cellSize * 0.5;
         this.ctx.strokeStyle = THEME.gridLine;
         this.ctx.lineWidth = 1;
         this.ctx.beginPath();
-        for (let y = playerY - worldOffset; y > -this.cellSize; y -= this.cellSize) {
-            const py = Math.round(y) + 0.5;
-            this.ctx.moveTo(this.offsetX, py);
-            this.ctx.lineTo(this.offsetX + GAME_CONFIG.GRID_COLS * this.cellSize, py);
+        // 横线：屏幕 Y = playerY - (worldY - scrollWorldY) * cellSize
+        // 取整数 worldY，使障碍物（同样位于整数世界行）正好落在格子中心
+        const worldTop = this.scrollWorldY + (playerY - 0) / this.cellSize;
+        const worldBottom = this.scrollWorldY + (playerY - this.height) / this.cellSize;
+        const firstLine = Math.ceil(worldBottom);
+        const lastLine = Math.floor(worldTop);
+        for (let worldLine = firstLine; worldLine <= lastLine; worldLine++) {
+            const screenY = Math.round(playerY - (worldLine - this.scrollWorldY) * this.cellSize) + 0.5;
+            if (screenY < 0 || screenY > this.height)
+                continue;
+            this.ctx.moveTo(left, screenY);
+            this.ctx.lineTo(right, screenY);
+        }
+        // 竖线：随横向平移，保持格子为正方形
+        for (let x = left + panX; x <= right; x += this.cellSize) {
+            const px = Math.round(x) + 0.5;
+            if (px < left || px > right)
+                continue;
+            this.ctx.moveTo(px, 0);
+            this.ctx.lineTo(px, this.height);
         }
         this.ctx.stroke();
     }
-    /** 当前世界滚动位置（用于网格滚动，纯视觉） */
     /**
      * 渲染游戏区域边框
      * 靠近障碍物时边框转为警示色
@@ -213,19 +247,26 @@ export class CanvasRenderer {
         this.ctx.stroke();
         this.ctx.restore();
     }
-    renderGame(state) {
+    /**
+     * 渲染进行中的画面
+     *
+     * @param state 服务端状态
+     * @param worldYOverride 可选的世界位置插值结果（仅影响取景与绘制位置，不修改任何游戏数据）
+     */
+    renderGame(state, worldYOverride) {
         const myPlayer = state.players.find(p => p.id === this.myPlayerId);
         if (!myPlayer)
             return;
-        const worldY = myPlayer.position.y;
+        // 取景位置：默认用服务端坐标，插值时用本地推算的平滑位置
+        const worldY = worldYOverride ?? myPlayer.position.y;
         const newCol = Math.floor(myPlayer.position.x / this.cellSize);
         // 初始化起始位置
         if (!this.gameStarted) {
             this.startWorldY = worldY;
             this.gameStarted = true;
         }
-        // 记录世界滚动位置（用于网格动画）
-        this.scrollWorldY = worldY * this.cellSize;
+        // 记录当前世界位置（网格换算与障碍物使用同一坐标系）
+        this.scrollWorldY = worldY;
         // 检测玩家死亡
         if (!myPlayer.isAlive && !this.isDead) {
             this.isDead = true;
@@ -239,8 +280,8 @@ export class CanvasRenderer {
         else {
             this.distance = myPlayer.distance ?? Math.floor(worldY - this.startWorldY);
         }
-        // 更新障碍物缓存
-        this.updateObstacleCache(state.obstacles, worldY);
+        // 更新障碍物缓存：始终使用服务端坐标建立缓存，保证世界坐标准确
+        this.updateObstacleCache(state.obstacles, myPlayer.position.y);
         // 检测是否靠近自己颜色的障碍物（使用服务器发送的proximityHints）
         this.checkDanger(state.proximityHints);
         // 先渲染路径（在障碍物下面）
@@ -250,10 +291,6 @@ export class CanvasRenderer {
         this.renderPath(worldY);
         // 再渲染障碍物（在路径上面）
         this.renderObstacles(worldY);
-        // 渲染玩家本体
-        if (!this.isDead) {
-            this.renderPlayer(worldY);
-        }
         // 渲染距离
         this.renderDistance();
         // 如果死亡，显示死亡提示
@@ -262,31 +299,6 @@ export class CanvasRenderer {
         }
         // 保存当前状态用于游戏结束
         this.saveFinalState(worldY);
-    }
-    /**
-     * 渲染玩家本体：底部车道上的圆角光块
-     */
-    renderPlayer(worldY) {
-        if (!this.ctx)
-            return;
-        const color = this.myPlayerColor ? PLAYER_COLOR_MAP[this.myPlayerColor] : '#c9d2e3';
-        const playerY = this.height - this.cellSize;
-        const cx = this.offsetX + (this.currentCol + 0.5) * this.cellSize;
-        const cy = playerY + this.cellSize / 2;
-        const size = this.cellSize - THEME.obstacleInset * 2;
-        this.ctx.save();
-        this.ctx.shadowColor = color;
-        this.ctx.shadowBlur = 26;
-        this.ctx.fillStyle = color;
-        this.ctx.beginPath();
-        this.ctx.roundRect(cx - size / 2, cy - size / 2, size, size, THEME.obstacleRadius);
-        this.ctx.fill();
-        this.ctx.restore();
-        // 内层高光
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
-        this.ctx.beginPath();
-        this.ctx.roundRect(cx - size / 2 + 3, cy - size / 2 + 3, size - 6, (size - 6) / 2.6, THEME.obstacleRadius - 3);
-        this.ctx.fill();
     }
     /**
      * 渲染死亡提示覆盖层
@@ -525,8 +537,8 @@ export class CanvasRenderer {
     }
     /**
      * 等待画面
-     * 画布只呈现空舞台；玩家数、房间号、准备状态由 DOM 状态栏与操作按钮承载，
-     * 避免在游戏区域内叠加文字造成信息重复。
+     * 画布只呈现空舞台（车道与格子）；玩家数、准备状态由 DOM 状态栏与操作按钮承载，
+     * 避免在游戏区域内叠加文字或光标造成信息重复。
      */
     renderWaitingScreen(_state) {
         if (!this.ctx)
@@ -538,21 +550,6 @@ export class CanvasRenderer {
         glow.addColorStop(1, 'rgba(111, 168, 255, 0)');
         this.ctx.fillStyle = glow;
         this.ctx.fillRect(0, 0, this.width, this.height);
-        // 车道中央的呼吸光标：表达"等待中"的静止感，不含方向引导
-        const t = (Date.now() % 2200) / 2200;
-        const pulse = 0.35 + 0.5 * Math.sin(t * Math.PI * 2);
-        const cx = this.offsetX + (1 + 0.5) * this.cellSize;
-        const cy = this.height - this.cellSize * 1.5;
-        this.ctx.save();
-        this.ctx.globalAlpha = Math.max(0.28, pulse);
-        this.ctx.strokeStyle = 'rgba(190, 210, 245, 0.85)';
-        this.ctx.lineWidth = 2;
-        this.ctx.shadowColor = 'rgba(140, 180, 255, 0.6)';
-        this.ctx.shadowBlur = 14;
-        this.ctx.beginPath();
-        this.ctx.roundRect(cx - 22, cy - 22, 44, 44, 12);
-        this.ctx.stroke();
-        this.ctx.restore();
     }
     /**
      * 倒计时画面
@@ -580,6 +577,17 @@ export class CanvasRenderer {
         this.ctx.fillStyle = THEME.textDim;
         this.ctx.font = `13px ${THEME.fontFamily}`;
         this.ctx.fillText('即将开始', centerX, centerY + 92);
+    }
+    getVeilGradient() {
+        if (!this.ctx)
+            return null;
+        if (!this.cachedVeil) {
+            const veil = this.ctx.createLinearGradient(0, 0, 0, this.height);
+            veil.addColorStop(0, 'rgba(8, 10, 15, 0.72)');
+            veil.addColorStop(1, 'rgba(8, 10, 15, 0.86)');
+            this.cachedVeil = veil;
+        }
+        return this.cachedVeil;
     }
     /**
      * 游戏结束画面
@@ -640,11 +648,11 @@ export class CanvasRenderer {
             }
         }
         // 半透明遮罩
-        const veil = this.ctx.createLinearGradient(0, 0, 0, this.height);
-        veil.addColorStop(0, 'rgba(8, 10, 15, 0.72)');
-        veil.addColorStop(1, 'rgba(8, 10, 15, 0.86)');
-        this.ctx.fillStyle = veil;
-        this.ctx.fillRect(0, 0, this.width, this.height);
+        const veil = this.getVeilGradient();
+        if (veil) {
+            this.ctx.fillStyle = veil;
+            this.ctx.fillRect(0, 0, this.width, this.height);
+        }
         const centerX = this.width / 2;
         const centerY = this.height / 2;
         // 结算面板
