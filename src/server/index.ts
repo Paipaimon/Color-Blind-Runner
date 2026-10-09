@@ -109,13 +109,16 @@ class GameServer {
    * 处理 HTTP 请求 - 提供静态文件
    */
   private handleHttpRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const url = req.url || '/';
-    
-    console.log(`[HTTP] ${req.method} ${url}`);
+    const rawUrl = req.url || '/';
+
+    // 去除查询字符串与哈希，避免带参数访问（如 ?debug=layout）时匹配失败
+    const pathname = rawUrl.split('?')[0].split('#')[0];
+
+    console.log(`[HTTP] ${req.method} ${rawUrl}`);
 
     try {
       // 处理根路径
-      if (url === '/' || url === '/index.html') {
+      if (pathname === '/' || pathname === '/index.html') {
         const filePath = path.join(__dirname, '../../public/index.html');
         console.log(`[HTTP] 读取文件: ${filePath}`);
         this.serveFile(res, filePath, 'text/html; charset=utf-8');
@@ -123,23 +126,23 @@ class GameServer {
       }
 
       // 处理 /dist 路径下的文件
-      if (url.startsWith('/dist/')) {
-        const filePath = path.join(__dirname, '../../', url);
+      if (pathname.startsWith('/dist/')) {
+        const filePath = path.join(__dirname, '../../', pathname);
         console.log(`[HTTP] 读取文件: ${filePath}`);
-        this.serveFile(res, filePath, this.getMimeType(url));
+        this.serveFile(res, filePath, this.getMimeType(pathname));
         return;
       }
 
       // 处理其他静态文件
-      if (url.startsWith('/')) {
-        const filePath = path.join(__dirname, '../../public', url);
+      if (pathname.startsWith('/')) {
+        const filePath = path.join(__dirname, '../../public', pathname);
         console.log(`[HTTP] 读取文件: ${filePath}`);
-        this.serveFile(res, filePath, this.getMimeType(url));
+        this.serveFile(res, filePath, this.getMimeType(pathname));
         return;
       }
 
       // 404 响应
-      console.log(`[HTTP] 404: ${url}`);
+      console.log(`[HTTP] 404: ${rawUrl}`);
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('Not Found');
     } catch (error) {

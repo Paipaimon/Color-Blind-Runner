@@ -25,6 +25,10 @@ export declare class ViewportManager {
     private deviceInfo;
     private resizeObserver;
     private orientationChangeHandler;
+    /** 上一次写入的舞台高度，用于避免重复写 CSS 变量引发无意义重排 */
+    private lastStageHeight;
+    /** 上一次写入的画布显示宽度 */
+    private lastCanvasWidth;
     constructor(canvas: HTMLCanvasElement, statusBar: HTMLElement, gameWrapper: HTMLElement);
     /**
      * 初始化视口管理器
@@ -47,18 +51,29 @@ export declare class ViewportManager {
      */
     private detectDevice;
     /**
-     * 计算最优画布尺寸
-     * Requirements: 2.1 - 自动调整游戏画布大小以适配屏幕
-     * 移动端竖屏时裁剪两边显示更大，占屏幕80%高度
+     * 测量游戏舞台的实际可用高度并写入 CSS 变量
+     * 该值决定画布按 16:9 能占用的最大高度，避免出现上下留白或溢出错位。
      */
-    private calculateOptimalCanvasSize;
+    private updateStageHeight;
     /**
-     * 调整画布尺寸
+     * 计算并应用画布显示宽度
+     * 以「舞台实测高度 × 16/9」为基准，再与可用宽度取较小值，
+     * 保证画布在舞台内等比铺满：竖屏移动端额外限制为屏幕高度的 80%（沿用既有适配规则）。
+     */
+    private applyCanvasWidth;
+    /**
+     * 调整画布显示尺寸
+     * 显示尺寸由 applyCanvasWidth 直接写入（宽 + 高 + 内部分辨率同步），
+     * 保证在任何视口下都严格保持 16:9，不依赖 CSS 对 canvas 固有比例的推导。
+     * Requirements: 2.1, 2.4
      */
     private adjustCanvasSize;
     /**
      * 调整状态栏布局
      * Requirements: 2.3, 2.4 - 确保UI元素可见，响应式布局
+     *
+     * 说明（UI 重构）：仅切换类名，具体尺寸/间距/换行规则由样式表定义，
+     * 避免内联样式与 CSS 相互覆盖。
      */
     private adjustStatusBarLayout;
     /**
@@ -85,6 +100,8 @@ export declare class ViewportManager {
     private setupResizeListener;
     /**
      * 处理窗口大小变化
+     * 注意：这里只重算画布与状态栏布局，且画布尺寸类名/CSS 变量是幂等的，
+     * 避免 ResizeObserver 因自身改动再次触发导致抖动。
      */
     private handleResize;
     /**

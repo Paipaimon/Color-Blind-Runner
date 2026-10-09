@@ -23,6 +23,7 @@ Color Blind Runner 是一个基于「颜色盲区」规则的多人在线生存�
 
 - **TypeScript** - 类型安全
 - **Canvas 2D API** - 游戏画面渲染（固定内部分辨率 1280×720，通过 CSS 缩放适配屏幕）
+- **原生 DOM + CSS** - 状态栏 / 操作按钮 / 连接状态等界面层，无前端框架
 - **WebSocket** - 实时双向通信
 - **响应式设计** - 移动端适配、横竖屏切换
 
@@ -37,7 +38,7 @@ Color Blind Runner 是一个基于「颜色盲区」规则的多人在线生存�
 ```
 blind-line-game/
 ├── public/
-│   └── index.html              # 游戏页面（含状态栏 DOM 与样式）
+│   └── index.html              # 页面骨架 + 设计令牌/样式（状态栏、操作按钮、连接状态、断线遮罩）
 ├── src/
 │   ├── shared/                 # 前后端共享
 │   │   ├── types.ts            # 玩家/障碍物/房间/可见状态类型，颜色枚举
@@ -54,16 +55,18 @@ blind-line-game/
 │   │   ├── seeded-random.ts    # Mulberry32 可复现随机数
 │   │   └── collision-detector.test.ts # 碰撞检测单元测试
 │   └── client/                 # 客户端
-│       ├── index.ts            # 入口：编排渲染、输入、网络与状态栏
+│       ├── index.ts            # 入口：编排渲染、输入、网络、状态栏与界面控件
 │       ├── websocket-client.ts # WebSocket 连接与消息收发
 │       ├── input-handler.ts    # 键盘输入（方向键 / WASD）
 │       ├── touch-handler.ts    # 触控滑动输入
 │       ├── touch-feedback.ts   # 触控视觉反馈（波纹 + 方向指示）
 │       ├── input-merger.ts     # 键盘与触控输入合并
 │       ├── input-merger.test.ts# 输入合并单元测试
-│       ├── canvas-renderer.ts  # Canvas 渲染（路径、障碍物、距离、遮罩）
+│       ├── canvas-renderer.ts  # Canvas 渲染（主题、车道、路径、障碍物、距离、遮罩）
 │       ├── viewport-manager.ts # 视口/尺寸/设备适配
-│       └── status-bar-renderer.ts # 状态栏 DOM 渲染（统计、最佳成绩）
+│       └── status-bar-renderer.ts # 状态栏 DOM 渲染（按数据槽增量更新）
+├── docs/ui/                    # 界面样张（大厅与对局状态）
+├── scripts/debug/              # 调试辅助脚本（投放脚本玩家、无头截图）
 ├── dist/                       # TypeScript 编译输出（服务器实际加载此处）
 ├── verify-input-merger.js      # 输入合并逻辑的独立验证脚本
 ├── tsconfig.json
@@ -114,26 +117,47 @@ blind-line-game/
 - **键盘**：[input-handler.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/input-handler.ts) 监听方向键与 WASD；服务端实际只消费左右方向（路线切换），上下键当前不产生位移
 - **触控**：[touch-handler.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/touch-handler.ts) 识别左右滑动手势（最小距离 30px、最长 300ms、50ms 防抖），垂直滑动默认关闭
 - **输入合并**：[input-merger.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/input-merger.ts) 对键盘与触控做逻辑或（OR）合并，仅在合并结果变化时才发送，避免重复消息
-- **准备 / 重开**：空格键、点击画布或触摸画布
+- **准备 / 重开**：空格键 / 回车、点击底部操作按钮、点击画布或触摸画布
 
 ### 渲染系统
 
-渲染器固定在 1280×720 内部分辨率上绘制，实际显示尺寸由 CSS 缩放，保证逻辑与视觉一致。
+渲染器固定在 1280×720 逻辑坐标系上绘制（画布内部分辨率会按显示尺寸与像素比同步，保证清晰度），实际显示尺寸由 CSS 按 16:9 缩放。
 
 - 玩家固定在屏幕底部，世界向上滚动、障碍物自上而下迎面而来
-- 绘制玩家走过的完整路径轨迹（按玩家颜色着色）
-- 左上角实时显示距离
+- 玩家表现为底部车道上的圆角光块，并绘制走过的完整路径轨迹（按玩家颜色着色）
+- 右侧留白处实时显示距离；三条车道有边框、分隔线与滚动网格作为运动参照
 - 依次渲染：等待 / 倒计时 / 进行中 / 游戏结束四种画面
-- 情绪化反馈：危险时边框变红、死亡时叠加红色遮罩并提示「你已死亡 / 观看其他玩家...」
+- 情绪化反馈：危险时车道边框转为警示色并随强度增强、死亡时叠加红色遮罩并提示「你已死亡 / 正在观战 / 最终距离」
 
 ### 状态栏
 
-[status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) 以 DOM 形式渲染：
+[status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) 以 DOM 形式渲染，按数据槽增量更新：
 
-- 等待/倒计时：房间号、自身颜色、玩家数、倒计时
-- 进行中：距离（m）、存活时间、死亡状态标记
+- 等待/倒计时：房间号、自身颜色、玩家占用、状态胶囊（等待玩家 / 倒计时 N）
+- 进行中：距离（m）、存活时间、自身状态（进行中 / 已死亡 · 观战中）
 - 结束：最终距离、存活时间、移动次数、个人最佳对比（新纪录提示）
 - 个人最佳存储于 `localStorage` 的 `colorBlindRunner_personalBest`
+
+### 界面层（UI 重构后）
+
+界面分为四层，游戏逻辑与渲染数据流不受界面改动影响：
+
+| 区域 | 承载内容 | 实现 |
+|------|---------|------|
+| 顶部品牌栏 | 四色标识 + 连接状态灯（连接中 / 已连接 / 连接已断开） | `public/index.html` + [index.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/index.ts) |
+| 状态栏 HUD | 房间号、玩家占用、自身颜色、状态胶囊；对局中追加距离与存活时间；结束态追加最终成绩与个人最佳对比 | [status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) |
+| 游戏舞台 | 1280×720 画布，按 16:9 自适应舞台 | [canvas-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/canvas-renderer.ts) |
+| 底部操作区 | 主操作按钮（准备 / 已准备 / 倒计时 / 游戏进行中 / 重新开始）+ 按键提示 | [index.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/index.ts) |
+
+界面样张见 [docs/ui](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/docs/ui)：`lobby-desktop.png`、`lobby-mobile.png`、`state-playing.png`、`state-danger.png`、`state-dead.png`。
+
+设计要点：
+
+- **状态可读性**：状态栏不再每帧重建 DOM，改为构造时建立数据槽、渲染时增量写入文本与类名，避免样式抖动
+- **危险提示**：自己颜色的障碍物逼近时，车道边框转为警示色并随强度增强（唯一的危险反馈，不含方向引导）
+- **颜色即信息**：四种玩家颜色在 UI 与画布中一致，且不额外标注障碍物信息，避免削弱"颜色盲区"这一核心机制
+- **移动端**：竖屏时状态栏改为纵向堆叠，画布按屏幕高度的 80% 推导；横屏矮屏时隐藏品牌栏与提示以保住画面高度
+- **可访问性**：主操作为原生 `button`（支持键盘聚焦与回车触发），空格 / 回车与点击画布同样可触发准备与重开
 
 ### 网络同步
 
@@ -202,6 +226,43 @@ npm test
 npm run test:watch
 ```
 
+### 在 WSL 中调试
+
+本仓库的 `node_modules/.bin` 由 Windows 侧 npm 生成，其中的 shim 是 0 字节文件，
+在 WSL 里执行 `npm run build` / `npm test` 会「成功但什么都没做」。**在 WSL 下请使用直接调用入口的脚本：**
+
+```bash
+# WSL 中编译（等价于 tsc）
+npm run build:node
+
+# WSL 中运行测试（等价于 vitest run）
+npm run test:node
+
+# WSL 中启动服务器
+npm run start:server
+```
+
+多客户端联调与截图辅助脚本位于 [scripts/debug](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/scripts/debug)：
+
+```bash
+# 投放 N 个脚本玩家并全部准备，用于触发开局（浏览器端可作为第 3 名玩家加入）
+node scripts/debug/drive-players.cjs 2 20000
+
+# 通过 CDP 连接无头浏览器，等待指定游戏状态后截图
+node scripts/debug/cdp-shot.cjs shot.png 15000 PLAYING
+```
+
+### 界面调试参数
+
+页面支持若干仅用于调试的 URL 参数（不影响正常玩法）：
+
+| 参数 | 作用 |
+|------|------|
+| `?debug=layout` | 在 DOM 中写入关键元素实测尺寸，便于核验响应式布局 |
+| `?debug=state&scene=playing` | 用真实渲染器离线渲染单个对局画面（可选 `waiting` / `countdown` / `playing` / `danger` / `dead` / `gameover`） |
+| `?autoplay=1` | 加入房间后自动准备，便于无头环境验证进行中界面 |
+| `?server=<host>` | 指定 WebSocket 服务器地址 |
+
 ### 本地访问
 
 `npm run start:server` 后访问 `http://localhost:8000`，服务器会：
@@ -248,6 +309,7 @@ npm run test:watch
 
 以下为阅读源码时发现的、与文档/命名不完全一致之处，当前行为以代码为准：
 
+- **阻塞性问题（未修复）**：房间开局后服务器会因 `ObstacleGenerator not initialized. Call init() first.` 崩溃（`game-loop.ts` 的 `tick()` → `obstacleGenerator.generateNext()`）。原因是 `GameLoop` 只持有单个 `ObstacleGenerator` 实例且按房间复用，而 `RoomManager.startGame()` 与 `GameLoop.start()` 各自维护一套房间状态，第二轮开局时生成器未针对该房间重新初始化。这属于服务端游戏逻辑缺陷，本次 UI 重构未改动相关代码，另行修复
 - `shared/types.ts` 中的 `COLOR_VISIBILITY` 常量（红/绿/蓝各可见 4 色）**未被任何逻辑使用**，实际规则是排除自身颜色
 - `ObstacleColor` 定义了 `CYAN` / `MAGENTA` / `WHITE` 混合色，但生成器只从玩家颜色中取色，因此混合色障碍物当前不会出现
 - `GAME_CONFIG.STATE_BROADCAST_RATE = 30` 与实际使用的 `GAME_LOOP_CONFIG.BROADCAST_RATE = 20` 不一致，后者才是生效值
@@ -255,6 +317,7 @@ npm run test:watch
 - `HEARTBEAT_INTERVAL` / `CONNECTION_TIMEOUT` 已定义，但客户端未启动心跳定时器
 - 存在两套并行的 `GameState` 枚举（`shared/types.ts` 与 `game-loop.ts`，以及 `visibility-filter.ts`），通过转换函数映射
 - `input-merger` 中累计的移动次数仅在游戏结束界面展示
+- `dist/` 中存在若干历史编译产物（如 `-viewport-manager.js`、`game-tips.js`、`integration-test.js`），源码已无对应文件，删除目录重新编译即可清理
 
 ## 许可证
 

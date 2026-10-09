@@ -1,1 +1,17 @@
 node_modules/
+
+# 编辑器与本地工具目录
+.vscode/
+.idea/
+
+# 协作工具的本地会话数据（该目录下的运行时产物不入库）
+.markdown-collab/*
+!.markdown-collab/.gitkeep
+
+# 调试脚本产出的截图与日志
+scripts/debug/*.png
+scripts/debug/*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db

@@ -4,8 +4,6 @@
  * Requirements: 2.1, 2.2, 2.3, 2.4 - 移动端界面适配
  */
 
-import { GAME_CONFIG } from '../shared/constants.js';
-
 /**
  * 设备信息接口
  */
@@ -29,6 +27,12 @@ export class ViewportManager {
   private deviceInfo: DeviceInfo;
   private resizeObserver: ResizeObserver | null = null;
   private orientationChangeHandler: (() => void) | null = null;
+
+  /** 上一次写入的舞台高度，用于避免重复写 CSS 变量引发无意义重排 */
+  private lastStageHeight: number = 0;
+
+  /** 上一次写入的画布显示宽度 */
+  private lastCanvasWidth: number = 0;
 
   constructor(canvas: HTMLCanvasElement, statusBar: HTMLElement, gameWrapper: HTMLElement) {
     this.canvas = canvas;
@@ -56,7 +60,8 @@ export class ViewportManager {
     // 监听窗口大小变化
     this.setupResizeListener();
     
-    // 初始调整
+    // 初始调整（先测量舞台高度，画布宽度公式依赖它）
+    this.updateStageHeight();
     this.handleResize();
   }
 
@@ -125,112 +130,85 @@ export class ViewportManager {
   }
 
   /**
-   * 计算最优画布尺寸
-   * Requirements: 2.1 - 自动调整游戏画布大小以适配屏幕
-   * 移动端竖屏时裁剪两边显示更大，占屏幕80%高度
+   * 测量游戏舞台的实际可用高度并写入 CSS 变量
+   * 该值决定画布按 16:9 能占用的最大高度，避免出现上下留白或溢出错位。
    */
-  private calculateOptimalCanvasSize(): { width: number; height: number } {
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    
-    // 移动端竖屏特殊处理：占屏幕80%高度
-    if (this.deviceInfo.isMobile && this.deviceInfo.orientation === 'portrait') {
-      // 使用屏幕高度的80%作为画布高度
-      let canvasHeight = viewportHeight * 0.8;
-      let canvasWidth = canvasHeight * (16 / 9); // 保持16:9比例
-      
-      // 确保最小尺寸
-      const minWidth = 320;
-      const minHeight = 180;
-      
-      canvasWidth = Math.max(canvasWidth, minWidth);
-      canvasHeight = Math.max(canvasHeight, minHeight);
-      
-      return {
-        width: Math.floor(canvasWidth),
-        height: Math.floor(canvasHeight)
-      };
+  private updateStageHeight(): void {
+    const stage = this.gameWrapper.querySelector('.game-stage') as HTMLElement | null;
+    if (!stage) {
+      return;
     }
-    
-    // 其他情况：为状态栏预留空间的传统计算
-    const statusBarHeight = this.statusBar.offsetHeight || 50;
-    const availableHeight = viewportHeight - statusBarHeight - 20; // 20px 边距
-    const availableWidth = viewportWidth - 20; // 10px 左右边距
-    
-    // 计算基于16:9比例的尺寸
-    const aspectRatio = 16 / 9;
-    let canvasWidth = availableWidth;
-    let canvasHeight = canvasWidth / aspectRatio;
-    
-    // 如果高度超出可用空间，以高度为准
-    if (canvasHeight > availableHeight) {
-      canvasHeight = availableHeight;
-      canvasWidth = canvasHeight * aspectRatio;
+
+    const height = stage.clientHeight;
+    if (height > 0 && Math.abs(height - this.lastStageHeight) >= 1) {
+      this.lastStageHeight = height;
+      stage.style.setProperty('--stage-h', `${height}px`);
     }
-    
-    // 确保最小尺寸
-    const minWidth = 320;
-    const minHeight = 180;
-    
-    canvasWidth = Math.max(canvasWidth, minWidth);
-    canvasHeight = Math.max(canvasHeight, minHeight);
-    
-    // 确保不超过原始尺寸（避免放大）
-    canvasWidth = Math.min(canvasWidth, GAME_CONFIG.GAME_WIDTH);
-    canvasHeight = Math.min(canvasHeight, GAME_CONFIG.GAME_HEIGHT);
-    
-    return {
-      width: Math.floor(canvasWidth),
-      height: Math.floor(canvasHeight)
-    };
   }
 
   /**
-   * 调整画布尺寸
+   * 计算并应用画布显示宽度
+   * 以「舞台实测高度 × 16/9」为基准，再与可用宽度取较小值，
+   * 保证画布在舞台内等比铺满：竖屏移动端额外限制为屏幕高度的 80%（沿用既有适配规则）。
+   */
+  private applyCanvasWidth(): void {
+    const stage = this.gameWrapper.querySelector('.game-stage') as HTMLElement | null;
+    const stageWidth = stage?.clientWidth ?? this.gameWrapper.clientWidth;
+    const stageHeight = stage?.clientHeight ?? this.lastStageHeight;
+    const horizontalPadding = 8;
+
+    if (stageWidth <= 0 || stageHeight <= 0) {
+      return;
+    }
+
+    const heightLimit =
+      this.deviceInfo.isMobile && this.deviceInfo.orientation === 'portrait'
+        ? Math.min(stageHeight, window.innerHeight * 0.8)
+        : stageHeight;
+
+    const targetWidth = Math.floor(Math.min(stageWidth - horizontalPadding, heightLimit * (16 / 9)));
+    const targetHeight = Math.floor(targetWidth * 9 / 16);
+
+    if (targetWidth >= 320 && targetWidth !== this.lastCanvasWidth) {
+      this.lastCanvasWidth = targetWidth;
+      // 仅设置显示尺寸：canvas 固有宽高比会在高度为 auto 时覆盖 aspect-ratio，
+      // 因此显式给出宽高像素值；内部分辨率恒为 1280×720（渲染器逻辑坐标系）。
+      this.canvas.style.width = `${targetWidth}px`;
+      this.canvas.style.height = `${targetHeight}px`;
+      this.canvas.dataset.sizing = 'fixed';
+    }
+  }
+
+  /**
+   * 调整画布显示尺寸
+   * 显示尺寸由 applyCanvasWidth 直接写入（宽 + 高 + 内部分辨率同步），
+   * 保证在任何视口下都严格保持 16:9，不依赖 CSS 对 canvas 固有比例的推导。
+   * Requirements: 2.1, 2.4
    */
   private adjustCanvasSize(): void {
-    const { width, height } = this.calculateOptimalCanvasSize();
-    
-    // 设置画布显示尺寸（CSS）
-    this.canvas.style.width = `${width}px`;
-    this.canvas.style.height = `${height}px`;
-    
-    // 保持内部分辨率不变，通过CSS缩放
-    // 这样可以保持游戏逻辑的一致性
-    this.canvas.width = GAME_CONFIG.GAME_WIDTH;
-    this.canvas.height = GAME_CONFIG.GAME_HEIGHT;
+    this.applyCanvasWidth();
   }
 
   /**
    * 调整状态栏布局
    * Requirements: 2.3, 2.4 - 确保UI元素可见，响应式布局
+   *
+   * 说明（UI 重构）：仅切换类名，具体尺寸/间距/换行规则由样式表定义，
+   * 避免内联样式与 CSS 相互覆盖。
    */
   private adjustStatusBarLayout(): void {
-    if (this.deviceInfo.isMobile) {
-      // 移动端：垂直布局，较小字体
-      this.statusBar.style.flexDirection = 'column';
-      this.statusBar.style.gap = '8px';
-      this.statusBar.style.fontSize = '12px';
-      this.statusBar.style.padding = '8px 12px';
-      
-      // 调整状态项布局
-      const statusItems = this.statusBar.querySelectorAll('.status-item') as NodeListOf<HTMLElement>;
-      statusItems.forEach(item => {
-        item.style.justifyContent = 'space-between';
-        item.style.minWidth = '120px';
-      });
-    } else if (this.deviceInfo.isTablet) {
-      // 平板：保持水平布局，适中字体
-      this.statusBar.style.flexDirection = 'row';
-      this.statusBar.style.gap = '15px';
-      this.statusBar.style.fontSize = '13px';
-      this.statusBar.style.padding = '8px 16px';
+    if (this.deviceInfo.isMobile && this.deviceInfo.orientation === 'portrait') {
+      this.statusBar.classList.add('mobile-layout');
+      this.statusBar.classList.remove('landscape-compact');
+    } else if (this.deviceInfo.isMobile || this.deviceInfo.isTablet) {
+      this.statusBar.classList.remove('mobile-layout');
+      if (this.deviceInfo.orientation === 'landscape' && this.deviceInfo.screenHeight < 500) {
+        this.statusBar.classList.add('landscape-compact');
+      } else {
+        this.statusBar.classList.remove('landscape-compact');
+      }
     } else {
-      // 桌面：恢复默认布局
-      this.statusBar.style.flexDirection = 'row';
-      this.statusBar.style.gap = '20px';
-      this.statusBar.style.fontSize = '14px';
-      this.statusBar.style.padding = '8px 16px';
+      this.statusBar.classList.remove('mobile-layout', 'landscape-compact');
     }
   }
 
@@ -343,16 +321,19 @@ export class ViewportManager {
 
   /**
    * 处理窗口大小变化
+   * 注意：这里只重算画布与状态栏布局，且画布尺寸类名/CSS 变量是幂等的，
+   * 避免 ResizeObserver 因自身改动再次触发导致抖动。
    */
   private handleResize(): void {
     // 更新设备信息
     this.deviceInfo = this.detectDevice();
-    
-    // 重新调整画布大小
-    if (this.deviceInfo.isMobile || this.deviceInfo.isTablet) {
-      this.adjustCanvasSize();
-    }
-    
+
+    // 实测舞台高度并写入 CSS 变量（画布 16:9 自适应依赖该值）
+    this.updateStageHeight();
+
+    // 重新调整画布大小（桌面端会清除干预，交回样式表自适应）
+    this.adjustCanvasSize();
+
     // 重新调整状态栏布局
     this.adjustStatusBarLayout();
   }

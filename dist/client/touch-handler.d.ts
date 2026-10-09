@@ -14,6 +14,7 @@ export declare class TouchHandler {
     private element;
     private inputMerger;
     private feedbackManager;
+    private feedbackElement;
     private isEnabled;
     private isBound;
     private touchStartX;
@@ -26,7 +27,7 @@ export declare class TouchHandler {
     private touchStartHandler;
     private touchMoveHandler;
     private touchEndHandler;
-    constructor(element: HTMLElement, inputMerger: InputMerger);
+    constructor(element: HTMLElement, inputMerger: InputMerger, feedbackLayer?: HTMLElement | null);
     /**
      * 绑定触控事件
      * Requirements: 1.1, 1.2 - 检测左右滑动手势

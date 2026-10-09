@@ -36,6 +36,7 @@ export class TouchHandler {
   private element: HTMLElement;
   private inputMerger: InputMerger;
   private feedbackManager: TouchFeedbackManager;
+  private feedbackElement: HTMLElement;
   private isEnabled: boolean = false;
   private isBound: boolean = false;
   
@@ -67,12 +68,16 @@ export class TouchHandler {
   private touchMoveHandler: (e: TouchEvent) => void;
   private touchEndHandler: (e: TouchEvent) => void;
 
-  constructor(element: HTMLElement, inputMerger: InputMerger) {
+  constructor(element: HTMLElement, inputMerger: InputMerger, feedbackLayer?: HTMLElement | null) {
     this.element = element;
     this.inputMerger = inputMerger;
     
     // Requirements: 4.1 - 初始化触控反馈管理器
-    this.feedbackManager = new TouchFeedbackManager(element);
+    // 反馈元素默认挂载在画布上；若提供了独立反馈层（位于画布之上、不拦截指针事件），优先使用，
+    // 这样波纹与方向指示不会被画布的 canvas 内容裁剪或覆盖。
+    const feedbackContainer = feedbackLayer || element;
+    this.feedbackManager = new TouchFeedbackManager(feedbackContainer);
+    this.feedbackElement = feedbackContainer;
     
     // 绑定事件处理函数
     this.touchStartHandler = this.handleTouchStart.bind(this);
@@ -142,10 +147,18 @@ export class TouchHandler {
     const touch = event.touches[0];
     
     // Requirements: 4.5 - 检查触控是否在游戏画布范围内
+    // 反馈层与画布同尺寸且不拦截事件，命中判定取两者并集，避免因层叠导致边缘触控失效
     const rect = this.element.getBoundingClientRect();
-    if (touch.clientX < rect.left || touch.clientX > rect.right ||
-        touch.clientY < rect.top || touch.clientY > rect.bottom) {
-      return;
+    const inCanvas = touch.clientX >= rect.left && touch.clientX <= rect.right &&
+                     touch.clientY >= rect.top && touch.clientY <= rect.bottom;
+
+    if (!inCanvas) {
+      const feedbackRect = this.feedbackElement.getBoundingClientRect();
+      const inFeedbackLayer = touch.clientX >= feedbackRect.left && touch.clientX <= feedbackRect.right &&
+                              touch.clientY >= feedbackRect.top && touch.clientY <= feedbackRect.bottom;
+      if (!inFeedbackLayer) {
+        return;
+      }
     }
     
     this.touchStartX = touch.clientX;

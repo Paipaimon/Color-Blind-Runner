@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "build:node": "node ./node_modules/typescript/bin/tsc",
     "start:server": "node dist/server/index.js",
     "dev:server": "tsx src/server/index.ts",
     "test": "vitest run",
+    "test:node": "node ./node_modules/vitest/vitest.mjs run",
     "test:watch": "vitest"
   },
   "dependencies": {
