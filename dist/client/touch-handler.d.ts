@@ -63,6 +63,16 @@ export declare class TouchHandler {
      */
     private detectSwipeDirection;
     /**
+     * 判断是否为短促轻触（滑动距离 < 16px、耗时 < 250ms）
+     * 用于在滑动未达阈值时，提供「点击屏幕左右区域即可换道」的兜底交互。
+     */
+    private isTap;
+    /**
+     * 根据轻触位置在画布上的横向区域判断移动方向
+     * 左侧 1/3 区域 = 左移，右侧 1/3 区域 = 右移，中间 1/3 忽略。
+     */
+    private detectTapDirection;
+    /**
      * 根据滑动方向更新输入状态
      * Requirements: 1.1, 1.2 - 左右滑动转换为移动输入命令
      */

@@ -56,9 +56,13 @@ export declare class ViewportManager {
      */
     private updateStageHeight;
     /**
-     * 计算并应用画布显示宽度
-     * 以「舞台实测高度 × 16/9」为基准，再与可用宽度取较小值，
-     * 保证画布在舞台内等比铺满：竖屏移动端额外限制为屏幕高度的 80%（沿用既有适配规则）。
+     * 计算并应用画布显示尺寸
+     *
+     * - 桌面端 / 横屏：保持 16:9 横向宽幅，沿用原逻辑等比缩放。
+     * - 移动端竖屏：宽度直接占满可用舞台宽度（仅留 2px 安全边距），
+     *   高度按 9:16 竖版比例推导，使画布整体接近屏幕比例，
+     *   避免上下过度留白；同时写入 data-layout="mobile-portrait"
+     *   供渲染器切换内部布局（赛道横向占满、单元格放大）。
      */
     private applyCanvasWidth;
     /**
@@ -79,6 +83,10 @@ export declare class ViewportManager {
     /**
      * 禁用缩放
      * Requirements: 2.4 - 禁止缩放以保持游戏体验一致性
+     *
+     * 注：CSS 已设置 viewport meta、touch-action: none/manipulation 与 overscroll-behavior: none，
+     *     已能阻止双击缩放、回弹滚动与页面缩放。此处仅保留 iOS Safari 特有的 pinch 手势监听，
+     *     避免全局 touchend/dblclick 拦截与游戏触控输入冲突。
      */
     private preventZoom;
     /**
@@ -96,6 +104,10 @@ export declare class ViewportManager {
     private setupOrientationChangeListener;
     /**
      * 设置窗口大小变化监听器
+     *
+     * 监听 .game-stage 而非 document.body：
+     * .game-stage 的高度由 flex 分配，会随状态栏内容变化（特别是移动端竖屏下状态栏换行），
+     * 只有它的尺寸变化才需要重新计算画布大小，避免 body 高度不变时错过重排。
      */
     private setupResizeListener;
     /**
@@ -103,7 +115,7 @@ export declare class ViewportManager {
      * 注意：这里只重算画布与状态栏布局，且画布尺寸类名/CSS 变量是幂等的，
      * 避免 ResizeObserver 因自身改动再次触发导致抖动。
      */
-    private handleResize;
+    handleResize(): void;
     /**
      * 获取当前设备信息
      */

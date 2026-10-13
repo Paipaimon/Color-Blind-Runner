@@ -14,6 +14,9 @@ export declare class CanvasRenderer {
     private height;
     private cellSize;
     private offsetX;
+    private scale;
+    private layoutParams;
+    private layoutMode;
     private myPlayerId;
     private myPlayerColor;
     private pathPoints;
@@ -30,7 +33,13 @@ export declare class CanvasRenderer {
     private scrollWorldY;
     private cachedBackground;
     private cachedVeil;
+    constructor();
     init(canvas: HTMLCanvasElement): void;
+    /**
+     * 从画布元素的 data-* 属性读取显示尺寸，重算内部布局与分辨率。
+     * 若尺寸/模式变化则返回 true，调用方需清空渐变缓存并同步 canvas.width/height。
+     */
+    private applyLayoutFromCanvas;
     setMyPlayer(playerId: string, color: PlayerColor): void;
     resetAll(): void;
     /**
@@ -44,17 +53,27 @@ export declare class CanvasRenderer {
     render(state: VisibleState, worldYOverride?: number): void;
     /**
      * 绘制舞台：背景、车道、网格与边框
+     *
+     * 背景用单位矩阵绘制（覆盖整个画布），
+     * 赛道内容（车道、网格、边框）用缩放矩阵绘制，使移动端竖屏时赛道占满宽度。
      */
     clear(): void;
     /**
      * 横向滚动网格线
      * 玩家在车道内横向移动时，格子整体跟着平移半格，使格子中心与玩家/障碍物中心对齐；
      * 纵向按世界坐标换算，因此与障碍物同速同向向下流动，每个障碍物都落在格子里。
+     *
+     * 注意：调用此方法时，ctx 变换矩阵已包含 offsetX 平移和 scale 缩放，
+     * 因此此处坐标全部使用逻辑坐标系（offsetX=0，高度需除以 scale）。
      */
     private renderScrollGrid;
     /**
      * 渲染游戏区域边框
      * 靠近障碍物时边框转为警示色
+     *
+     * 注意：调用此方法时，ctx 变换矩阵已包含 offsetX 平移和 scale 缩放，
+     * 因此此处坐标全部使用逻辑坐标系。
+     * 移动端竖屏：边框贴赛道左右边缘，不做圆角（视觉上赛道占满全宽）
      */
     private renderBoundary;
     /**
@@ -66,6 +85,8 @@ export declare class CanvasRenderer {
     private renderGame;
     /**
      * 渲染死亡提示覆盖层
+     *
+     * 注意：此方法使用单位矩阵绘制全屏遮罩和文字。
      */
     private renderDeathOverlay;
     /**
@@ -95,6 +116,9 @@ export declare class CanvasRenderer {
     /**
      * 渲染障碍物（从缓存）
      * 玩家在底部，障碍物从顶部向下滚动
+     *
+     * 注意：调用此方法时，ctx 变换矩阵已包含 offsetX 平移和 scale 缩放，
+     * 因此此处坐标全部使用逻辑坐标系。
      */
     private renderObstacles;
     /**
@@ -103,22 +127,32 @@ export declare class CanvasRenderer {
     private drawObstacle;
     /**
      * 渲染距离
-     * 绘制在游戏区域右侧留白处，不遮挡车道
+     * - 桌面/横屏：绘制在游戏区域右侧留白处，不遮挡车道
+     * - 移动端竖屏：绘制在左上角，叠加在赛道上方但留足边距，避免遮挡玩家与障碍物
+     *
+     * 注意：调用此方法时，ctx 变换矩阵已包含 offsetX 平移和 scale 缩放，
+     * 因此此处坐标全部使用逻辑坐标系，字体大小需除以 scale。
      */
     private renderDistance;
     /**
      * 等待画面
      * 画布只呈现空舞台（车道与格子）；玩家数、准备状态由 DOM 状态栏与操作按钮承载，
      * 避免在游戏区域内叠加文字或光标造成信息重复。
+     *
+     * 注意：此方法使用单位矩阵绘制全屏渐变（clear 已用缩放矩阵绘制赛道）。
      */
     private renderWaitingScreen;
     /**
      * 倒计时画面
+     *
+     * 注意：此方法使用单位矩阵绘制全屏遮罩和文字。
      */
     private renderCountdown;
     private getVeilGradient;
     /**
      * 游戏结束画面
+     *
+     * 注意：路径和障碍物使用缩放矩阵（逻辑坐标系），遮罩和文字使用单位矩阵。
      */
     private renderGameOver;
     getSize(): {

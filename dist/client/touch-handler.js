@@ -37,8 +37,8 @@ export class TouchHandler {
     };
     // 配置参数
     config = {
-        minSwipeDistance: 30, // 最小滑动距离(px)
-        maxSwipeTime: 300, // 最大滑动时间(ms)
+        minSwipeDistance: 24, // 最小滑动距离(px)，略低于旧值以兼容短促滑动
+        maxSwipeTime: 600, // 最大滑动时间(ms)，放宽到 600ms 避免慢速滑动被误过滤
         debounceTime: 50, // 防抖时间(ms)
         enableVerticalSwipe: false // 当前游戏只需要左右移动
     };
@@ -171,11 +171,20 @@ export class TouchHandler {
             // Requirements: 4.1 - 显示触控反馈效果
             this.showSwipeFeedback(endX, endY, direction);
             this.updateInputFromSwipe(direction);
+            return;
         }
-        else {
-            // Requirements: 1.3 - 无有效滑动时停止发送移动命令
-            this.resetInput();
+        // 滑动未达阈值时，尝试识别为「点击左右半区」的轻触移动，
+        // 这是移动端竖屏单手操作的常见 fallback，能显著提升操作成功率。
+        if (this.isTap(deltaX, deltaY, deltaTime)) {
+            const tapDirection = this.detectTapDirection(endX, endY);
+            if (tapDirection) {
+                this.showSwipeFeedback(endX, endY, tapDirection);
+                this.updateInputFromSwipe(tapDirection);
+                return;
+            }
         }
+        // Requirements: 1.3 - 无有效滑动时停止发送移动命令
+        this.resetInput();
     }
     /**
      * 检测滑动方向
@@ -202,6 +211,31 @@ export class TouchHandler {
             // 垂直滑动（当前游戏不需要，但保留接口）
             return deltaY > 0 ? SwipeDirection.DOWN : SwipeDirection.UP;
         }
+        return null;
+    }
+    /**
+     * 判断是否为短促轻触（滑动距离 < 16px、耗时 < 250ms）
+     * 用于在滑动未达阈值时，提供「点击屏幕左右区域即可换道」的兜底交互。
+     */
+    isTap(deltaX, deltaY, deltaTime) {
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        return distance < 16 && deltaTime < 250;
+    }
+    /**
+     * 根据轻触位置在画布上的横向区域判断移动方向
+     * 左侧 1/3 区域 = 左移，右侧 1/3 区域 = 右移，中间 1/3 忽略。
+     */
+    detectTapDirection(x, y) {
+        const rect = this.element.getBoundingClientRect();
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+            return null;
+        }
+        const relativeX = x - rect.left;
+        const ratio = relativeX / rect.width;
+        if (ratio < 0.33)
+            return SwipeDirection.LEFT;
+        if (ratio > 0.66)
+            return SwipeDirection.RIGHT;
         return null;
     }
     /**

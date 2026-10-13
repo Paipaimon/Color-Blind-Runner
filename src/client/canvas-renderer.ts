@@ -8,7 +8,7 @@
  */
 
 import { VisibleState, Obstacle, GameState, PlayerColor, ObstacleColor, ProximityHint } from '../shared/types.js';
-import { GAME_CONFIG } from '../shared/constants.js';
+import { GAME_CONFIG, computeLayoutParams, LayoutParams, LayoutMode } from '../shared/constants.js';
 
 /** 玩家颜色映射 */
 const PLAYER_COLOR_MAP: Record<PlayerColor, string> = {
@@ -68,6 +68,9 @@ export class CanvasRenderer {
   private height: number = GAME_CONFIG.GAME_HEIGHT;
   private cellSize: number = GAME_CONFIG.CELL_SIZE;
   private offsetX: number = GAME_CONFIG.GAME_AREA_OFFSET;  // 游戏区域左侧偏移
+  private scale: number = 1;  // 视觉缩放因子（移动端竖屏放大车道）
+  private layoutParams: LayoutParams;
+  private layoutMode: LayoutMode = 'desktop';
   private myPlayerId: string | null = null;
   private myPlayerColor: PlayerColor | null = null;
 
@@ -107,15 +110,51 @@ export class CanvasRenderer {
   private cachedBackground: CanvasGradient | null = null;
   private cachedVeil: CanvasGradient | null = null;
 
+  constructor() {
+    this.layoutParams = computeLayoutParams(GAME_CONFIG.GAME_WIDTH, GAME_CONFIG.GAME_HEIGHT);
+  }
+
   init(canvas: HTMLCanvasElement): void {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     if (!this.ctx) throw new Error('无法获取 Canvas 2D 上下文');
-    // 内部分辨率恒为 1280×720：全部绘制坐标基于该逻辑尺寸，显示缩放交给 CSS。
-    // 注意：不要按显示尺寸改写 canvas.width/height，否则坐标系会随之改变导致画面错位。
+    this.applyLayoutFromCanvas();
     canvas.width = this.width;
     canvas.height = this.height;
     this.resetAll();
+  }
+
+  /**
+   * 从画布元素的 data-* 属性读取显示尺寸，重算内部布局与分辨率。
+   * 若尺寸/模式变化则返回 true，调用方需清空渐变缓存并同步 canvas.width/height。
+   */
+  private applyLayoutFromCanvas(): boolean {
+    if (!this.canvas) return false;
+    const dw = Number(this.canvas.dataset.displayWidth) || this.canvas.clientWidth || GAME_CONFIG.GAME_WIDTH;
+    const dh = Number(this.canvas.dataset.displayHeight) || this.canvas.clientHeight || GAME_CONFIG.GAME_HEIGHT;
+    const next = computeLayoutParams(dw, dh);
+    const changed =
+      next.mode !== this.layoutMode ||
+      next.gameWidth !== this.width ||
+      next.gameHeight !== this.height ||
+      next.cellSize !== this.cellSize ||
+      next.offsetX !== this.offsetX ||
+      next.scale !== this.scale;
+    if (!changed) return false;
+    this.layoutParams = next;
+    this.layoutMode = next.mode;
+    this.width = next.gameWidth;
+    this.height = next.gameHeight;
+    this.cellSize = next.cellSize;
+    this.offsetX = next.offsetX;
+    this.scale = next.scale;
+    this.cachedBackground = null;
+    this.cachedVeil = null;
+    if (this.canvas && (this.canvas.width !== this.width || this.canvas.height !== this.height)) {
+      this.canvas.width = this.width;
+      this.canvas.height = this.height;
+    }
+    return true;
   }
 
   setMyPlayer(playerId: string, color: PlayerColor): void {
@@ -147,9 +186,13 @@ export class CanvasRenderer {
    */
   render(state: VisibleState, worldYOverride?: number): void {
     if (!this.ctx) return;
+
+    this.applyLayoutFromCanvas();
+
+    // 背景用单位矩阵绘制（覆盖整个画布），赛道内容用缩放矩阵绘制
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.clear();
 
-    // 暴露当前状态供调试工具读取（无逻辑作用）
     if (this.canvas && this.canvas.dataset.gameState !== state.gameState) {
       this.canvas.dataset.gameState = state.gameState;
     }
@@ -168,18 +211,25 @@ export class CanvasRenderer {
         this.renderGameOver();
         break;
     }
+
+    // 恢复单位变换，避免影响外部读取
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   /**
    * 绘制舞台：背景、车道、网格与边框
+   *
+   * 背景用单位矩阵绘制（覆盖整个画布），
+   * 赛道内容（车道、网格、边框）用缩放矩阵绘制，使移动端竖屏时赛道占满宽度。
    */
   clear(): void {
     if (!this.ctx) return;
 
     const gameAreaWidth = GAME_CONFIG.GRID_COLS * this.cellSize;
     const gameAreaHeight = GAME_CONFIG.GRID_ROWS * this.cellSize;
+    const isMobilePortrait = this.layoutMode === 'mobile-portrait';
 
-    // 游戏区域整体背景（渐变缓存复用）
+    // 游戏区域整体背景（渐变缓存复用）—— 用单位矩阵覆盖整个画布
     if (!this.cachedBackground) {
       const bg = this.ctx.createLinearGradient(0, 0, 0, this.height);
       bg.addColorStop(0, THEME.bgTop);
@@ -189,37 +239,46 @@ export class CanvasRenderer {
     this.ctx.fillStyle = this.cachedBackground;
     this.ctx.fillRect(0, 0, this.width, this.height);
 
-    // 左右留白（暗角），让视线聚焦到三条车道上
-    this.ctx.fillStyle = THEME.gutter;
-    this.ctx.fillRect(0, 0, this.offsetX, this.height);
-    this.ctx.fillRect(this.offsetX + gameAreaWidth, 0, this.width - this.offsetX - gameAreaWidth, this.height);
+    // 桌面/横屏保留左右暗角；移动端竖屏去掉暗角
+    if (!isMobilePortrait) {
+      this.ctx.fillStyle = THEME.gutter;
+      this.ctx.fillRect(0, 0, this.offsetX, this.height);
+      this.ctx.fillRect(this.offsetX + gameAreaWidth, 0, this.width - this.offsetX - gameAreaWidth, this.height);
+    }
 
-    // 车道交替底色
+    // 设置缩放变换：移动端竖屏时放大并居中赛道
+    if (isMobilePortrait) {
+      this.ctx.setTransform(this.scale, 0, 0, this.scale, this.offsetX, 0);
+    } else {
+      this.ctx.setTransform(1, 0, 0, 1, this.offsetX, 0);
+    }
+
+    // 车道交替底色（逻辑坐标系，offsetX=0 因为已在变换中平移）
     this.ctx.fillStyle = THEME.laneAlt;
-    this.ctx.fillRect(this.offsetX + this.cellSize, 0, this.cellSize, this.height);
+    this.ctx.fillRect(this.cellSize, 0, this.cellSize, this.height / this.scale);
 
     // 横向滚动网格（提供运动参照）
     this.renderScrollGrid();
 
     // 车道分隔线
     this.ctx.strokeStyle = THEME.laneSeparator;
-    this.ctx.lineWidth = 1;
+    this.ctx.lineWidth = 1 / this.scale;
     this.ctx.beginPath();
     for (let col = 1; col < GAME_CONFIG.GRID_COLS; col++) {
-      const x = Math.round(this.offsetX + col * this.cellSize) + 0.5;
+      const x = Math.round(col * this.cellSize) + 0.5;
       this.ctx.moveTo(x, 0);
-      this.ctx.lineTo(x, this.height);
+      this.ctx.lineTo(x, this.height / this.scale);
     }
     this.ctx.stroke();
 
-    // 危险光晕（自己颜色的障碍物逼近时）：透明度随强度变化，需每帧重建渐变
+    // 危险光晕
     if (this.isDanger) {
-      const tint = this.ctx.createLinearGradient(0, 0, 0, this.height);
+      const tint = this.ctx.createLinearGradient(0, 0, 0, this.height / this.scale);
       const alpha = Math.min(1, 0.4 + this.dangerIntensity * 0.6);
       tint.addColorStop(0, `rgba(255, 60, 60, ${0.05 * alpha})`);
       tint.addColorStop(1, `rgba(255, 60, 60, ${0.16 * alpha})`);
       this.ctx.fillStyle = tint;
-      this.ctx.fillRect(this.offsetX, 0, gameAreaWidth, this.height);
+      this.ctx.fillRect(0, 0, gameAreaWidth, this.height / this.scale);
     }
 
     // 游戏区域边框
@@ -230,32 +289,36 @@ export class CanvasRenderer {
    * 横向滚动网格线
    * 玩家在车道内横向移动时，格子整体跟着平移半格，使格子中心与玩家/障碍物中心对齐；
    * 纵向按世界坐标换算，因此与障碍物同速同向向下流动，每个障碍物都落在格子里。
+   *
+   * 注意：调用此方法时，ctx 变换矩阵已包含 offsetX 平移和 scale 缩放，
+   * 因此此处坐标全部使用逻辑坐标系（offsetX=0，高度需除以 scale）。
    */
   private renderScrollGrid(): void {
     if (!this.ctx) return;
 
-    const left = this.offsetX;
-    const right = this.offsetX + GAME_CONFIG.GRID_COLS * this.cellSize;
-    const playerY = this.height - this.cellSize;
+    const logicalHeight = this.height / this.scale;
+    const left = 0;
+    const right = GAME_CONFIG.GRID_COLS * this.cellSize;
+    const playerY = logicalHeight - this.cellSize;
 
     // 玩家列中心相对车道中心的偏移（半格），让格子随横向移动平移
     const laneCenterCol = (GAME_CONFIG.GRID_COLS - 1) / 2;
     const panX = (this.currentCol - laneCenterCol) * this.cellSize * 0.5;
 
     this.ctx.strokeStyle = THEME.gridLine;
-    this.ctx.lineWidth = 1;
+    this.ctx.lineWidth = 1 / this.scale;
     this.ctx.beginPath();
 
     // 横线：屏幕 Y = playerY - (worldY - scrollWorldY) * cellSize
     // 取整数 worldY，使障碍物（同样位于整数世界行）正好落在格子中心
     const worldTop = this.scrollWorldY + (playerY - 0) / this.cellSize;
-    const worldBottom = this.scrollWorldY + (playerY - this.height) / this.cellSize;
+    const worldBottom = this.scrollWorldY + (playerY - logicalHeight) / this.cellSize;
     const firstLine = Math.ceil(worldBottom);
     const lastLine = Math.floor(worldTop);
 
     for (let worldLine = firstLine; worldLine <= lastLine; worldLine++) {
       const screenY = Math.round(playerY - (worldLine - this.scrollWorldY) * this.cellSize) + 0.5;
-      if (screenY < 0 || screenY > this.height) continue;
+      if (screenY < 0 || screenY > logicalHeight) continue;
       this.ctx.moveTo(left, screenY);
       this.ctx.lineTo(right, screenY);
     }
@@ -265,7 +328,7 @@ export class CanvasRenderer {
       const px = Math.round(x) + 0.5;
       if (px < left || px > right) continue;
       this.ctx.moveTo(px, 0);
-      this.ctx.lineTo(px, this.height);
+      this.ctx.lineTo(px, logicalHeight);
     }
 
     this.ctx.stroke();
@@ -274,28 +337,40 @@ export class CanvasRenderer {
   /**
    * 渲染游戏区域边框
    * 靠近障碍物时边框转为警示色
+   *
+   * 注意：调用此方法时，ctx 变换矩阵已包含 offsetX 平移和 scale 缩放，
+   * 因此此处坐标全部使用逻辑坐标系。
+   * 移动端竖屏：边框贴赛道左右边缘，不做圆角（视觉上赛道占满全宽）
    */
   private renderBoundary(gameAreaHeight: number): void {
     if (!this.ctx) return;
 
     const gameAreaWidth = GAME_CONFIG.GRID_COLS * this.cellSize;
-    const x = this.offsetX;
-    const y = (this.height - gameAreaHeight) / 2;
+    const logicalHeight = this.height / this.scale;
+    const isMobilePortrait = this.layoutMode === 'mobile-portrait';
+    const x = 0;
+    const drawWidth = gameAreaWidth;
+    const radius = isMobilePortrait ? 0 : 14;
+    const y = (logicalHeight - gameAreaHeight) / 2;
 
     if (this.isDanger) {
       this.ctx.save();
       this.ctx.shadowColor = THEME.dangerFrame;
-      this.ctx.shadowBlur = 18 + this.dangerIntensity * 22;
+      this.ctx.shadowBlur = (18 + this.dangerIntensity * 22) / this.scale;
       this.ctx.strokeStyle = THEME.dangerFrame;
-      this.ctx.lineWidth = 2 + this.dangerIntensity * 2;
+      this.ctx.lineWidth = (2 + this.dangerIntensity * 2) / this.scale;
     } else {
       this.ctx.save();
       this.ctx.strokeStyle = THEME.frame;
-      this.ctx.lineWidth = 1.5;
+      this.ctx.lineWidth = 1.5 / this.scale;
     }
 
     this.ctx.beginPath();
-    this.ctx.roundRect(x + 0.5, y + 0.5, gameAreaWidth - 1, gameAreaHeight - 1, 14);
+    if (radius > 0) {
+      this.ctx.roundRect(x + 0.5, y + 0.5, drawWidth - 1, gameAreaHeight - 1, radius);
+    } else {
+      this.ctx.rect(x + 0.5, y + 0.5, drawWidth - 1, gameAreaHeight - 1);
+    }
     this.ctx.stroke();
     this.ctx.restore();
   }
@@ -366,9 +441,14 @@ export class CanvasRenderer {
 
   /**
    * 渲染死亡提示覆盖层
+   *
+   * 注意：此方法使用单位矩阵绘制全屏遮罩和文字。
    */
   private renderDeathOverlay(): void {
     if (!this.ctx) return;
+
+    // 用单位矩阵绘制全屏遮罩
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     // 半透明红色遮罩
     const veil = this.ctx.createLinearGradient(0, 0, 0, this.height);
@@ -497,23 +577,24 @@ export class CanvasRenderer {
     if (!this.gameStarted) return;
 
     const lineColor = this.myPlayerColor ? PLAYER_COLOR_MAP[this.myPlayerColor] : '#c9d2e3';
+    const logicalHeight = this.height / this.scale;
 
     this.ctx.save();
     this.ctx.strokeStyle = lineColor;
-    this.ctx.lineWidth = 5;
+    this.ctx.lineWidth = 5 / this.scale;
     this.ctx.lineCap = 'round';
     this.ctx.lineJoin = 'round';
     this.ctx.shadowColor = lineColor;
-    this.ctx.shadowBlur = 16;
+    this.ctx.shadowBlur = 16 / this.scale;
     this.ctx.globalAlpha = 0.92;
 
     // 玩家位置在底部
-    const playerScreenY = this.height - this.cellSize;
+    const playerScreenY = logicalHeight - this.cellSize;
 
     this.ctx.beginPath();
 
     // 从当前位置开始（玩家所在位置）
-    const currentX = this.offsetX + (this.currentCol + 0.5) * this.cellSize;
+    const currentX = (this.currentCol + 0.5) * this.cellSize;
     this.ctx.moveTo(currentX, playerScreenY);
 
     // 当前绘制位置的X坐标
@@ -525,20 +606,18 @@ export class CanvasRenderer {
       const point = this.pathPoints[i];
 
       // 计算转折点的屏幕Y坐标
-      // 转折点worldY比当前worldY小，在屏幕下方
-      // 屏幕Y = playerScreenY + (worldY - point.worldY) * cellSize
       const screenY = playerScreenY + (worldY - point.worldY) * this.cellSize;
 
       // 如果转折点在屏幕上方（不应该发生）
       if (screenY < 0) continue;
 
       // 如果已经超出屏幕底部，画到底部后停止
-      if (screenY > this.height) {
-        this.ctx.lineTo(drawX, this.height);
+      if (screenY > logicalHeight) {
+        this.ctx.lineTo(drawX, logicalHeight);
         break;
       }
 
-      const pointX = this.offsetX + (point.col + 0.5) * this.cellSize;
+      const pointX = (point.col + 0.5) * this.cellSize;
 
       // 绘制：先垂直到转折点Y，再水平到转折点X
       this.ctx.lineTo(drawX, screenY);  // 垂直线
@@ -548,16 +627,13 @@ export class CanvasRenderer {
     }
 
     // 计算起始位置的屏幕Y
-    // 起始位置的worldY是startWorldY，比当前worldY小，在屏幕下方
     const startScreenY = playerScreenY + (worldY - this.startWorldY) * this.cellSize;
 
     // 始终延伸到起始位置或屏幕底部
-    if (startScreenY >= 0 && startScreenY <= this.height) {
-      // 起始位置在屏幕内，延伸到起始位置
+    if (startScreenY >= 0 && startScreenY <= logicalHeight) {
       this.ctx.lineTo(drawX, startScreenY);
-    } else if (startScreenY > this.height) {
-      // 起始位置在屏幕外下方，延伸到屏幕底部
-      this.ctx.lineTo(drawX, this.height);
+    } else if (startScreenY > logicalHeight) {
+      this.ctx.lineTo(drawX, logicalHeight);
     }
 
     this.ctx.stroke();
@@ -567,21 +643,24 @@ export class CanvasRenderer {
   /**
    * 渲染障碍物（从缓存）
    * 玩家在底部，障碍物从顶部向下滚动
+   *
+   * 注意：调用此方法时，ctx 变换矩阵已包含 offsetX 平移和 scale 缩放，
+   * 因此此处坐标全部使用逻辑坐标系。
    */
   private renderObstacles(worldY: number): void {
     if (!this.ctx) return;
 
-    const playerY = this.height - this.cellSize;
+    const logicalHeight = this.height / this.scale;
+    const playerY = logicalHeight - this.cellSize;
 
     for (const obs of this.obstacleCache.values()) {
       const color = OBSTACLE_COLOR_MAP[obs.color] || '#f4f6fb';
 
       // 从世界坐标计算屏幕坐标
-      // 障碍物worldY比玩家worldY大时，在屏幕上方
       const screenY = playerY - (obs.worldY - worldY) * this.cellSize;
-      const x = this.offsetX + obs.col * this.cellSize;
+      const x = obs.col * this.cellSize;
 
-      if (screenY >= -this.cellSize && screenY < this.height) {
+      if (screenY >= -this.cellSize && screenY < logicalHeight) {
         this.drawObstacle(x, screenY, color);
       }
     }
@@ -593,56 +672,86 @@ export class CanvasRenderer {
   private drawObstacle(x: number, screenY: number, color: string): void {
     if (!this.ctx) return;
 
-    const inset = THEME.obstacleInset;
+    const inset = THEME.obstacleInset / this.scale;
     const size = this.cellSize - inset * 2;
 
     this.ctx.save();
     this.ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-    this.ctx.shadowBlur = 12;
-    this.ctx.shadowOffsetY = 4;
+    this.ctx.shadowBlur = 12 / this.scale;
+    this.ctx.shadowOffsetY = 4 / this.scale;
     this.ctx.fillStyle = color;
     this.ctx.beginPath();
-    this.ctx.roundRect(x + inset, screenY + inset, size, size, THEME.obstacleRadius);
+    this.ctx.roundRect(x + inset, screenY + inset, size, size, THEME.obstacleRadius / this.scale);
     this.ctx.fill();
     this.ctx.restore();
 
     // 顶部内高光，增加体积感
     this.ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
     this.ctx.beginPath();
-    this.ctx.roundRect(x + inset + 3, screenY + inset + 3, size - 6, (size - 6) / 2.6, THEME.obstacleRadius - 3);
+    this.ctx.roundRect(x + inset + 3 / this.scale, screenY + inset + 3 / this.scale, size - 6 / this.scale, (size - 6 / this.scale) / 2.6, (THEME.obstacleRadius - 3) / this.scale);
     this.ctx.fill();
   }
 
   /**
    * 渲染距离
-   * 绘制在游戏区域右侧留白处，不遮挡车道
+   * - 桌面/横屏：绘制在游戏区域右侧留白处，不遮挡车道
+   * - 移动端竖屏：绘制在左上角，叠加在赛道上方但留足边距，避免遮挡玩家与障碍物
+   *
+   * 注意：调用此方法时，ctx 变换矩阵已包含 offsetX 平移和 scale 缩放，
+   * 因此此处坐标全部使用逻辑坐标系，字体大小需除以 scale。
    */
   private renderDistance(): void {
     if (!this.ctx) return;
 
-    const gameAreaRight = this.offsetX + GAME_CONFIG.GRID_COLS * this.cellSize;
-    const x = gameAreaRight + 24;
+    let x: number;
+    let labelY: number;
+    let valueY: number;
+    let labelSize: number;
+    let valueSize: number;
+    let align: CanvasTextAlign;
 
-    this.ctx.textAlign = 'left';
+    if (this.layoutMode === 'mobile-portrait') {
+      x = 10 / this.scale;
+      labelY = 12 / this.scale;
+      valueY = 28 / this.scale;
+      labelSize = 10 / this.scale;
+      valueSize = 20 / this.scale;
+      align = 'left';
+    } else {
+      const gameAreaWidth = GAME_CONFIG.GRID_COLS * this.cellSize;
+      x = gameAreaWidth + 24 / this.scale;
+      labelY = 18 / this.scale;
+      valueY = 34 / this.scale;
+      labelSize = 11 / this.scale;
+      valueSize = 22 / this.scale;
+      align = 'left';
+    }
+
+    this.ctx.textAlign = align;
     this.ctx.textBaseline = 'top';
 
     this.ctx.fillStyle = THEME.textDim;
-    this.ctx.font = `11px ${THEME.fontFamily}`;
-    this.ctx.fillText('距离', x, 18);
+    this.ctx.font = `${labelSize}px ${THEME.fontFamily}`;
+    this.ctx.fillText('距离', x, labelY);
 
     this.ctx.fillStyle = THEME.textPrimary;
-    this.ctx.font = `700 22px ${THEME.fontMono}`;
-    this.ctx.fillText(`${this.distance}`, x, 34);
+    this.ctx.font = `700 ${valueSize}px ${THEME.fontMono}`;
+    this.ctx.fillText(`${this.distance}`, x, valueY);
   }
 
   /**
    * 等待画面
    * 画布只呈现空舞台（车道与格子）；玩家数、准备状态由 DOM 状态栏与操作按钮承载，
    * 避免在游戏区域内叠加文字或光标造成信息重复。
+   *
+   * 注意：此方法使用单位矩阵绘制全屏渐变（clear 已用缩放矩阵绘制赛道）。
    */
   private renderWaitingScreen(_state: VisibleState): void {
     if (!this.ctx) return;
     this.resetAll();
+
+    // 用单位矩阵绘制全屏渐变
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     // 中心区域轻微提亮，作为空舞台的视觉焦点
     const glow = this.ctx.createRadialGradient(
@@ -657,9 +766,14 @@ export class CanvasRenderer {
 
   /**
    * 倒计时画面
+   *
+   * 注意：此方法使用单位矩阵绘制全屏遮罩和文字。
    */
   private renderCountdown(state: VisibleState): void {
     if (!this.ctx) return;
+
+    // 用单位矩阵绘制全屏遮罩
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     this.ctx.fillStyle = 'rgba(8, 10, 15, 0.55)';
     this.ctx.fillRect(0, 0, this.width, this.height);
@@ -700,27 +814,30 @@ export class CanvasRenderer {
 
   /**
    * 游戏结束画面
+   *
+   * 注意：路径和障碍物使用缩放矩阵（逻辑坐标系），遮罩和文字使用单位矩阵。
    */
   private renderGameOver(): void {
     if (!this.ctx) return;
 
-    const playerY = this.height - this.cellSize;
+    const logicalHeight = this.height / this.scale;
+    const playerY = logicalHeight - this.cellSize;
 
-    // 先渲染最终游戏画面
+    // 先渲染最终游戏画面（使用缩放矩阵，逻辑坐标系）
     if (this.finalState) {
       // 先渲染路径（显示完整走过的痕迹，向下延伸）
       const lineColor = this.myPlayerColor ? PLAYER_COLOR_MAP[this.myPlayerColor] : '#c9d2e3';
       this.ctx.save();
       this.ctx.strokeStyle = lineColor;
-      this.ctx.lineWidth = 5;
+      this.ctx.lineWidth = 5 / this.scale;
       this.ctx.lineCap = 'round';
       this.ctx.lineJoin = 'round';
       this.ctx.shadowColor = lineColor;
-      this.ctx.shadowBlur = 16;
+      this.ctx.shadowBlur = 16 / this.scale;
       this.ctx.globalAlpha = 0.9;
 
       this.ctx.beginPath();
-      const currentX = this.offsetX + (this.finalState.currentCol + 0.5) * this.cellSize;
+      const currentX = (this.finalState.currentCol + 0.5) * this.cellSize;
       this.ctx.moveTo(currentX, playerY);
 
       let drawX = currentX;
@@ -731,12 +848,12 @@ export class CanvasRenderer {
         const screenY = playerY + (worldY - point.worldY) * this.cellSize;
 
         if (screenY < 0) continue;
-        if (screenY > this.height) {
-          this.ctx.lineTo(drawX, this.height);
+        if (screenY > logicalHeight) {
+          this.ctx.lineTo(drawX, logicalHeight);
           break;
         }
 
-        const pointX = this.offsetX + (point.col + 0.5) * this.cellSize;
+        const pointX = (point.col + 0.5) * this.cellSize;
 
         this.ctx.lineTo(drawX, screenY);
         this.ctx.lineTo(pointX, screenY);
@@ -746,10 +863,10 @@ export class CanvasRenderer {
 
       // 延伸到起始位置或屏幕底部
       const startScreenY = playerY + (worldY - this.startWorldY) * this.cellSize;
-      if (startScreenY >= 0 && startScreenY <= this.height) {
+      if (startScreenY >= 0 && startScreenY <= logicalHeight) {
         this.ctx.lineTo(drawX, startScreenY);
-      } else if (startScreenY > this.height) {
-        this.ctx.lineTo(drawX, this.height);
+      } else if (startScreenY > logicalHeight) {
+        this.ctx.lineTo(drawX, logicalHeight);
       }
 
       this.ctx.stroke();
@@ -759,15 +876,17 @@ export class CanvasRenderer {
       for (const obs of this.finalState.obstacles) {
         const color = OBSTACLE_COLOR_MAP[obs.color] || '#f4f6fb';
         const screenY = playerY - (obs.worldY - this.finalState.worldY) * this.cellSize;
-        const x = this.offsetX + obs.col * this.cellSize;
+        const x = obs.col * this.cellSize;
 
-        if (screenY >= -this.cellSize && screenY < this.height) {
+        if (screenY >= -this.cellSize && screenY < logicalHeight) {
           this.drawObstacle(x, screenY, color);
         }
       }
     }
 
-    // 半透明遮罩
+    // 半透明遮罩和文字使用单位矩阵
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+
     const veil = this.getVeilGradient();
     if (veil) {
       this.ctx.fillStyle = veil;

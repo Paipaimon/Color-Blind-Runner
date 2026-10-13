@@ -147,35 +147,57 @@ export class ViewportManager {
   }
 
   /**
-   * 计算并应用画布显示宽度
-   * 以「舞台实测高度 × 16/9」为基准，再与可用宽度取较小值，
-   * 保证画布在舞台内等比铺满：竖屏移动端额外限制为屏幕高度的 80%（沿用既有适配规则）。
+   * 计算并应用画布显示尺寸
+   *
+   * - 桌面端 / 横屏：保持 16:9 横向宽幅，沿用原逻辑等比缩放。
+   * - 移动端竖屏：宽度直接占满可用舞台宽度（仅留 2px 安全边距），
+   *   高度按 9:16 竖版比例推导，使画布整体接近屏幕比例，
+   *   避免上下过度留白；同时写入 data-layout="mobile-portrait"
+   *   供渲染器切换内部布局（赛道横向占满、单元格放大）。
    */
   private applyCanvasWidth(): void {
     const stage = this.gameWrapper.querySelector('.game-stage') as HTMLElement | null;
     const stageWidth = stage?.clientWidth ?? this.gameWrapper.clientWidth;
     const stageHeight = stage?.clientHeight ?? this.lastStageHeight;
-    const horizontalPadding = 8;
 
     if (stageWidth <= 0 || stageHeight <= 0) {
       return;
     }
 
-    const heightLimit =
-      this.deviceInfo.isMobile && this.deviceInfo.orientation === 'portrait'
-        ? Math.min(stageHeight, window.innerHeight * 0.8)
-        : stageHeight;
+    const isMobilePortrait =
+      (this.deviceInfo.isMobile || this.deviceInfo.isTablet) &&
+      this.deviceInfo.orientation === 'portrait';
 
-    const targetWidth = Math.floor(Math.min(stageWidth - horizontalPadding, heightLimit * (16 / 9)));
-    const targetHeight = Math.floor(targetWidth * 9 / 16);
+    let targetWidth: number;
+    let targetHeight: number;
+    let layoutMode: string;
 
-    if (targetWidth >= 320 && targetWidth !== this.lastCanvasWidth) {
+    if (isMobilePortrait) {
+      targetWidth = Math.max(320, Math.floor(stageWidth));
+      const portraitHeight = Math.floor(targetWidth * (16 / 9));
+      targetHeight = Math.min(portraitHeight, Math.floor(stageHeight));
+      const fitBackWidth = Math.floor(targetHeight * (9 / 16));
+      if (fitBackWidth < targetWidth && fitBackWidth >= 320) {
+        targetWidth = fitBackWidth;
+      }
+      layoutMode = 'mobile-portrait';
+    } else {
+      const horizontalPadding = 8;
+      const heightLimit = stageHeight;
+      targetWidth = Math.floor(Math.min(stageWidth - horizontalPadding, heightLimit * (16 / 9)));
+      targetHeight = Math.floor(targetWidth * 9 / 16);
+      layoutMode = 'desktop';
+    }
+
+    if (targetWidth >= 320 && (targetWidth !== this.lastCanvasWidth ||
+        this.canvas.dataset.layout !== layoutMode)) {
       this.lastCanvasWidth = targetWidth;
-      // 仅设置显示尺寸：canvas 固有宽高比会在高度为 auto 时覆盖 aspect-ratio，
-      // 因此显式给出宽高像素值；内部分辨率恒为 1280×720（渲染器逻辑坐标系）。
       this.canvas.style.width = `${targetWidth}px`;
       this.canvas.style.height = `${targetHeight}px`;
       this.canvas.dataset.sizing = 'fixed';
+      this.canvas.dataset.layout = layoutMode;
+      this.canvas.dataset.displayWidth = String(targetWidth);
+      this.canvas.dataset.displayHeight = String(targetHeight);
     }
   }
 
@@ -215,26 +237,15 @@ export class ViewportManager {
   /**
    * 禁用缩放
    * Requirements: 2.4 - 禁止缩放以保持游戏体验一致性
+   *
+   * 注：CSS 已设置 viewport meta、touch-action: none/manipulation 与 overscroll-behavior: none，
+   *     已能阻止双击缩放、回弹滚动与页面缩放。此处仅保留 iOS Safari 特有的 pinch 手势监听，
+   *     避免全局 touchend/dblclick 拦截与游戏触控输入冲突。
    */
   private preventZoom(): void {
-    // 阻止双击缩放
-    document.addEventListener('dblclick', (e) => {
-      e.preventDefault();
-    }, { passive: false });
-    
-    // 阻止手势缩放
+    // 阻止 iOS Safari 双指捏合缩放（部分旧版本仍会触发 gesturestart）
     document.addEventListener('gesturestart', (e) => {
       e.preventDefault();
-    }, { passive: false });
-    
-    // 阻止触摸缩放
-    let lastTouchEnd = 0;
-    document.addEventListener('touchend', (e) => {
-      const now = Date.now();
-      if (now - lastTouchEnd <= 300) {
-        e.preventDefault();
-      }
-      lastTouchEnd = now;
     }, { passive: false });
   }
 
@@ -303,19 +314,26 @@ export class ViewportManager {
 
   /**
    * 设置窗口大小变化监听器
+   *
+   * 监听 .game-stage 而非 document.body：
+   * .game-stage 的高度由 flex 分配，会随状态栏内容变化（特别是移动端竖屏下状态栏换行），
+   * 只有它的尺寸变化才需要重新计算画布大小，避免 body 高度不变时错过重排。
    */
   private setupResizeListener(): void {
-    // 使用ResizeObserver监听窗口大小变化
+    const stage = this.gameWrapper.querySelector('.game-stage') as HTMLElement | null;
+    if (!stage) {
+      // 极端退化：如果连舞台都找不到，则监听 window resize
+      window.addEventListener('resize', () => this.handleResize());
+      return;
+    }
+
     if (window.ResizeObserver) {
       this.resizeObserver = new ResizeObserver(() => {
         this.handleResize();
       });
-      this.resizeObserver.observe(document.body);
+      this.resizeObserver.observe(stage);
     } else {
-      // 降级到window resize事件
-      window.addEventListener('resize', () => {
-        this.handleResize();
-      });
+      window.addEventListener('resize', () => this.handleResize());
     }
   }
 
@@ -324,7 +342,7 @@ export class ViewportManager {
    * 注意：这里只重算画布与状态栏布局，且画布尺寸类名/CSS 变量是幂等的，
    * 避免 ResizeObserver 因自身改动再次触发导致抖动。
    */
-  private handleResize(): void {
+  handleResize(): void {
     // 更新设备信息
     this.deviceInfo = this.detectDevice();
 

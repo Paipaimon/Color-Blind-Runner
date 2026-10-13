@@ -1,4 +1,5 @@
 node_modules/
+.workbuddy/
 
 # 编辑器与本地工具目录
 .vscode/
@@ -11,6 +12,7 @@ node_modules/
 # 调试脚本产出的截图与日志
 scripts/debug/*.png
 scripts/debug/*.log
+docs/
 
 # 系统文件
 .DS_Store

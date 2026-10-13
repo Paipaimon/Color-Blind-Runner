@@ -766,9 +766,19 @@
     }
 
     @media (hover: none) and (pointer: coarse) {
-      #gameCanvas { border-radius: var(--r-sm); }
-      .touch-feedback-layer { border-radius: var(--r-sm); }
       .status-label { font-size: 10px; }
+    }
+
+    /* 移动端竖屏：画布完全贴边，去掉边框/圆角/阴影，中间赛道直接占满手机左右屏幕 */
+    @media (hover: none) and (pointer: coarse) and (orientation: portrait) {
+      #gameCanvas {
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+        background: transparent;
+      }
+      .touch-feedback-layer { border-radius: 0; }
+      .game-stage::before { display: none; }
     }
 
     @media (prefers-reduced-motion: reduce) {

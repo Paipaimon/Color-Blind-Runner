@@ -50,6 +50,8 @@ class GameClient {
     // 界面状态缓存
     lastActionSignature = null;
     connectionState = 'connecting';
+    // 状态栏首次填充后需要重新校正画布尺寸，避免空状态栏导致测量偏大、画布被夹扁。
+    hasAdjustedLayoutForContent = false;
     // 房间花名册（仅用于状态栏显示在线 / 已准备人数，不参与任何规则判定）
     onlinePlayerIds = new Set();
     readyPlayerIds = new Set();
@@ -460,6 +462,10 @@ class GameClient {
             this.statusBarRenderer.render(this.currentState, this.myPlayerId, message.roomId, message.playerColor);
         }
         this.refreshActionButton();
+        // 状态栏内容首次填充后舞台高度会变化，需要立即重新计算画布尺寸，
+        // 避免按空状态栏测出的高度给画布导致后续被 max-height 夹扁变形。
+        this.hasAdjustedLayoutForContent = false;
+        this.viewportManager?.handleResize();
         // 调试辅助：?autoplay=1 时自动准备（需服务端房间人数达标），用于无头验证进行中界面
         if (new URLSearchParams(window.location.search).get('autoplay') === '1') {
             window.setTimeout(() => {
@@ -533,6 +539,12 @@ class GameClient {
         if (this.statusBarRenderer && this.myPlayerId) {
             this.statusBarRenderer.render(message.state, this.myPlayerId, this.roomId || undefined, this.myPlayerColor || undefined);
         }
+        // 首次收到状态广播时状态栏才真正有内容，此时校正一次画布尺寸；
+        // 之后由 ResizeObserver 监听舞台尺寸变化，无需每帧重算。
+        if (!this.hasAdjustedLayoutForContent) {
+            this.hasAdjustedLayoutForContent = true;
+            this.viewportManager?.handleResize();
+        }
         this.refreshActionButton();
     }
     /**
@@ -572,6 +584,8 @@ class GameClient {
             this.statusBarRenderer.render(this.currentState, this.myPlayerId, this.roomId || undefined, this.myPlayerColor || undefined);
         }
         this.refreshActionButton();
+        // 对局阶段状态栏会从「人数/准备」切换为「距离/时间」，内容变化可能再次改变舞台高度。
+        this.viewportManager?.handleResize();
     }
     /**
      * 处理游戏结束
