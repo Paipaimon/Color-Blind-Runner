@@ -22,6 +22,7 @@ export declare class InputMerger {
     private touchInput;
     private previousMergedInput;
     private onMoveCallback?;
+    private onInputObserver?;
     private readonly inputPriority;
     constructor(wsClient: WebSocketClient);
     /**
@@ -29,6 +30,11 @@ export declare class InputMerger {
      * Requirements: 3.1 - 统计移动次数用于游戏统计
      */
     setMoveCallback(callback: () => void): void;
+    /**
+     * 观察合并后实际发出的输入（仅调试用）
+     * 不改变任何输入行为，仅用于在浏览器内核验「触摸 → 输入」链路。
+     */
+    setInputObserver(observer: (input: PlayerInput) => void): void;
     /**
      * 更新键盘输入状态
      * Requirements: 6.1 - 键盘输入功能保持完全不变

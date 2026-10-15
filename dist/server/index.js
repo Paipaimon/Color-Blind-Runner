@@ -429,18 +429,19 @@ class GameServer {
         if (connection.roomId && connection.playerId) {
             const roomId = connection.roomId;
             const playerId = connection.playerId;
-            // 获取房间状态
-            const room = this.roomManager.getRoom(roomId);
-            if (room && room.gameState === GameState.PLAYING) {
-                // 游戏进行中，标记玩家死亡
+            // 判断是否处于进行中的对局。
+            // 注意：这里用 GameLoop 的房间状态判断，而不是 RoomManager 的状态——
+            // RoomManager.startGame 只会把状态置为 COUNTDOWN，对局进行中并不会更新为 PLAYING，
+            // 直接依赖它会漏判，导致掉线玩家被当作“离开房间”移除、对局永远不结束。
+            const gameRoom = this.gameRooms.get(roomId);
+            const inProgress = !!gameRoom && gameRoom.gameState === GameLoopState.PLAYING;
+            if (inProgress) {
+                // 游戏进行中，标记玩家死亡（随后由游戏循环判定是否只剩最后一名存活玩家）
                 this.roomManager.markPlayerDead(roomId, playerId);
                 // 更新 GameRoom 中的玩家状态
-                const gameRoom = this.gameRooms.get(roomId);
-                if (gameRoom) {
-                    const player = gameRoom.players.find(p => p.id === playerId);
-                    if (player) {
-                        player.alive = false;
-                    }
+                const player = gameRoom.players.find(p => p.id === playerId);
+                if (player) {
+                    player.alive = false;
                 }
                 // 通知其他玩家
                 this.broadcastToRoom(roomId, {

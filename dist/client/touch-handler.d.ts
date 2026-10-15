@@ -22,6 +22,7 @@ export declare class TouchHandler {
     private touchStartTime;
     private currentInput;
     private readonly config;
+    private gestureConsumed;
     private lastInputTime;
     private debounceTimer;
     private touchStartHandler;
@@ -49,7 +50,10 @@ export declare class TouchHandler {
     private handleTouchStart;
     /**
      * 处理触控移动事件
-     * Requirements: 1.4 - 阻止页面滚动和其他默认触摸行为
+     *
+     * 关键：拖动过程中一旦横向位移超过阈值就立即换道（不等抬手），
+     * 这样操作是「即时」的，也不会因为抬手前手指抖回而丢失手势。
+     * 一次触摸只换一条道（gestureConsumed），避免长按拖动连续换道。
      */
     private handleTouchMove;
     /**
@@ -63,13 +67,15 @@ export declare class TouchHandler {
      */
     private detectSwipeDirection;
     /**
-     * 判断是否为短促轻触（滑动距离 < 16px、耗时 < 250ms）
+     * 判断是否为短促轻触（滑动距离 < 18px、耗时 < 400ms）
      * 用于在滑动未达阈值时，提供「点击屏幕左右区域即可换道」的兜底交互。
+     * 阈值放宽是为了兼容真机上的轻微抖动与稍慢的点按。
      */
     private isTap;
     /**
      * 根据轻触位置在画布上的横向区域判断移动方向
-     * 左侧 1/3 区域 = 左移，右侧 1/3 区域 = 右移，中间 1/3 忽略。
+     * 左侧 40% 区域 = 左移，右侧 40% 区域 = 右移，中间 20% 忽略。
+     * 中间死区收窄是为了让「点哪边就往哪边走」在真机上更容易命中。
      */
     private detectTapDirection;
     /**

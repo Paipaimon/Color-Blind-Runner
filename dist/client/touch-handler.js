@@ -37,11 +37,13 @@ export class TouchHandler {
     };
     // 配置参数
     config = {
-        minSwipeDistance: 24, // 最小滑动距离(px)，略低于旧值以兼容短促滑动
-        maxSwipeTime: 600, // 最大滑动时间(ms)，放宽到 600ms 避免慢速滑动被误过滤
-        debounceTime: 50, // 防抖时间(ms)
+        minSwipeDistance: 18, // 拖动多久即判定为换道（越小越灵敏）
+        maxSwipeTime: 800, // 最大滑动时间(ms)，放宽到 800ms 兼容慢速拖动
+        debounceTime: 0, // 拖动中即时触发，无需防抖
         enableVerticalSwipe: false // 当前游戏只需要左右移动
     };
+    // 当前手势是否已经触发过换道（一次触摸只换一条道，避免连跳）
+    gestureConsumed = false;
     // 防抖相关
     lastInputTime = 0;
     debounceTimer = null;
@@ -131,18 +133,40 @@ export class TouchHandler {
         this.touchStartX = touch.clientX;
         this.touchStartY = touch.clientY;
         this.touchStartTime = Date.now();
+        // 新手势开始：允许本次触摸触发一次换道
+        this.gestureConsumed = false;
         // Requirements: 1.4 - 阻止默认触摸行为（页面滚动等）
         event.preventDefault();
     }
     /**
      * 处理触控移动事件
-     * Requirements: 1.4 - 阻止页面滚动和其他默认触摸行为
+     *
+     * 关键：拖动过程中一旦横向位移超过阈值就立即换道（不等抬手），
+     * 这样操作是「即时」的，也不会因为抬手前手指抖回而丢失手势。
+     * 一次触摸只换一条道（gestureConsumed），避免长按拖动连续换道。
      */
     handleTouchMove(event) {
         if (!this.isEnabled || event.touches.length === 0)
             return;
         // Requirements: 1.4 - 阻止默认触摸行为
         event.preventDefault();
+        if (this.gestureConsumed)
+            return;
+        const touch = event.touches[0];
+        const deltaX = touch.clientX - this.touchStartX;
+        const deltaY = touch.clientY - this.touchStartY;
+        const deltaTime = Date.now() - this.touchStartTime;
+        if (deltaTime > this.config.maxSwipeTime)
+            return;
+        const absX = Math.abs(deltaX);
+        const absY = Math.abs(deltaY);
+        // 横向位移达到阈值，且横向明显大于纵向 → 判定换道
+        if (absX >= this.config.minSwipeDistance && absX > absY) {
+            const direction = deltaX > 0 ? SwipeDirection.RIGHT : SwipeDirection.LEFT;
+            this.gestureConsumed = true;
+            this.showSwipeFeedback(touch.clientX, touch.clientY, direction);
+            this.updateInputFromSwipe(direction);
+        }
     }
     /**
      * 处理触控结束事件
@@ -165,12 +189,18 @@ export class TouchHandler {
         }
         const deltaX = endX - this.touchStartX;
         const deltaY = endY - this.touchStartY;
-        // 检测滑动方向
+        // 拖动阶段已经触发过换道：本次触摸不再重复触发
+        if (this.gestureConsumed) {
+            this.gestureConsumed = false;
+            return;
+        }
+        // 检测滑动方向（抬手时才越过阈值的情况）
         const direction = this.detectSwipeDirection(deltaX, deltaY, deltaTime);
         if (direction) {
             // Requirements: 4.1 - 显示触控反馈效果
             this.showSwipeFeedback(endX, endY, direction);
             this.updateInputFromSwipe(direction);
+            this.gestureConsumed = false;
             return;
         }
         // 滑动未达阈值时，尝试识别为「点击左右半区」的轻触移动，
@@ -180,9 +210,11 @@ export class TouchHandler {
             if (tapDirection) {
                 this.showSwipeFeedback(endX, endY, tapDirection);
                 this.updateInputFromSwipe(tapDirection);
+                this.gestureConsumed = false;
                 return;
             }
         }
+        this.gestureConsumed = false;
         // Requirements: 1.3 - 无有效滑动时停止发送移动命令
         this.resetInput();
     }
@@ -214,16 +246,18 @@ export class TouchHandler {
         return null;
     }
     /**
-     * 判断是否为短促轻触（滑动距离 < 16px、耗时 < 250ms）
+     * 判断是否为短促轻触（滑动距离 < 18px、耗时 < 400ms）
      * 用于在滑动未达阈值时，提供「点击屏幕左右区域即可换道」的兜底交互。
+     * 阈值放宽是为了兼容真机上的轻微抖动与稍慢的点按。
      */
     isTap(deltaX, deltaY, deltaTime) {
         const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-        return distance < 16 && deltaTime < 250;
+        return distance < 18 && deltaTime < 400;
     }
     /**
      * 根据轻触位置在画布上的横向区域判断移动方向
-     * 左侧 1/3 区域 = 左移，右侧 1/3 区域 = 右移，中间 1/3 忽略。
+     * 左侧 40% 区域 = 左移，右侧 40% 区域 = 右移，中间 20% 忽略。
+     * 中间死区收窄是为了让「点哪边就往哪边走」在真机上更容易命中。
      */
     detectTapDirection(x, y) {
         const rect = this.element.getBoundingClientRect();
@@ -232,9 +266,9 @@ export class TouchHandler {
         }
         const relativeX = x - rect.left;
         const ratio = relativeX / rect.width;
-        if (ratio < 0.33)
+        if (ratio < 0.4)
             return SwipeDirection.LEFT;
-        if (ratio > 0.66)
+        if (ratio > 0.6)
             return SwipeDirection.RIGHT;
         return null;
     }

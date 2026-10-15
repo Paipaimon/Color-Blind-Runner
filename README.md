@@ -262,14 +262,25 @@ npm run test:node
 npm run start:server
 ```
 
-多客户端联调与截图辅助脚本位于 [scripts/debug](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/scripts/debug)：
+多客户端联调与触控核验脚本位于 [scripts/debug](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/scripts/debug)：
 
 ```bash
-# 投放 N 个脚本玩家并全部准备，用于触发开局（浏览器端可作为第 3 名玩家加入）
-node scripts/debug/drive-players.cjs 2 20000
+# 启动/重启本地服务器（自动写日志并打印 WSL IP；服务器监听 0.0.0.0:8000）
+bash scripts/debug/serve.sh          # 未运行则启动
+bash scripts/debug/serve.sh restart  # 强制重启
 
-# 通过 CDP 连接无头浏览器，等待指定游戏状态后截图
-node scripts/debug/cdp-shot.cjs shot.png 15000 PLAYING
+# 投放 N 个脚本玩家（第 3 个参数为准备延迟，传 -1 表示只占位不准备）
+node scripts/debug/drive-players.cjs 2 20000 0
+
+# 占位玩家（停留在等待阶段，核验大厅状态栏人数）
+bash scripts/debug/hold-room.sh 2 15000
+
+# 核验「输入是否被服务端接受并生效」：两个脚本客户端开局，其一发送左右移动并打印 route 变化
+node scripts/debug/verify-input-applied.cjs
+
+# 移动端触控链路核验（需 Edge 以 --remote-debugging-port=9222 启动）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/debug/touch-link.ps1 -Port 9222 `
+    -Url 'http://localhost:8000/?debug=touch'
 ```
 
 ### 界面调试参数
@@ -282,6 +293,7 @@ node scripts/debug/cdp-shot.cjs shot.png 15000 PLAYING
 | `?debug=state&scene=playing` | 用真实渲染器离线渲染单个对局画面（可选 `waiting` / `countdown` / `playing` / `path` / `danger` / `dead` / `gameover`） |
 | `?debug=hud&phase=playing` | 用真实状态栏渲染器输出指定阶段的状态栏（可选 `idle` / `playing` / `finished`） |
 | `?debug=perf&frames=180` | 连续绘制对局画面并统计单帧耗时（结果写入 `#perfProbe`），用于核验帧率余量 |
+| `?debug=touch` | 进入合成对局并绑定真实触控处理器，把触摸事件与产生的输入记录到 `window.__TOUCH_LOG__` / `window.__INPUT_LOG__`，用于核验移动端触控链路 |
 | `?autoplay=1` | 加入房间后自动准备，便于无头环境验证进行中界面 |
 | `?server=<host>` | 指定 WebSocket 服务器地址 |
 
@@ -302,6 +314,40 @@ avg 0.102ms / median 0.100ms / p95 0.200ms / max 4ms（首帧建渐变）   60fp
 - 同一端口提供 WebSocket 服务
 
 多人测试时用多个浏览器窗口（或标签页）打开同一地址即可自动匹配进同一房间。
+
+### 在 WSL 中运行时，Windows 侧访问不了 localhost
+
+服务器跑在 WSL 里时，Windows 的 `localhost:8000` 需要 WSL 的 **localhost 转发**才能通。若没生效就表现为「服务器已经启动，但浏览器提示 localhost 拒绝连接」。排查与解决办法：
+
+```bash
+# 1) 确认服务器确实在 WSL 内监听（应看到 0.0.0.0:8000）
+bash scripts/debug/serve.sh        # 会打印监听状态与 WSL IP
+
+# 2) 在 WSL 内自测（能通说明服务器没问题，是转发问题）
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/
+```
+
+```powershell
+# 3) 在 Windows 侧用 WSL IP 验证（把 <WSL_IP> 换成上面脚本打印的地址）
+Invoke-WebRequest http://<WSL_IP>:8000/ -UseBasicParsing | Select-Object StatusCode
+```
+
+若第 3 步能通而 `localhost` 不通，在 `%USERPROFILE%\.wslconfig` 中开启转发并重启 WSL：
+
+```ini
+[wsl2]
+localhostForwarding=true
+```
+
+```powershell
+wsl --shutdown      # 重启 WSL 后重新打开终端，并重新启动服务器
+```
+
+补充说明：
+
+- 若在代理 / VPN 环境下 `localhostForwarding` 仍不生效，可改用镜像网络模式（Windows 11 22H2+）：在上面的 `[wsl2]` 段落加 `networkingMode=mirrored`
+- 手机同局域网联调：直接访问 `http://<WSL_IP>:8000/`（服务器已监听 `0.0.0.0`）；若连不上，多为 Windows 防火墙未放行该端口，放行后即可
+- 也可以直接在 Windows 侧运行服务器（需要 Windows 安装 Node.js），这样 `localhost:8000` 天然可用；本仓库无 Windows 侧 `node_modules`，因此默认走 WSL
 
 ### 部署说明
 

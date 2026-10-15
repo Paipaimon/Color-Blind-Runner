@@ -213,8 +213,60 @@ class GameClient {
             this.runFrameProfile(Number.isFinite(frames) && frames > 0 ? frames : 120);
             return;
         }
+        // 调试辅助：?debug=touch 进入对局并绑定触控处理器，用于核验滑动是否真的产生输入
+        if (debugMode === 'touch') {
+            this.renderTouchProbe();
+            return;
+        }
         // 连接服务器
         await this.connect();
+    }
+    /**
+     * 触控链路探针（仅调试用）
+     *
+     * 用一条合成的对局状态让客户端进入 PLAYING，并绑定真实的输入处理器，
+     * 然后把合成 TouchEvent 派发到画布上，观察 InputMerger 是否真的产生了玩家输入。
+     * 该模式不连接服务器，仅用于验证「触摸 → 输入」这一段链路。
+     */
+    renderTouchProbe() {
+        if (!this.canvas)
+            return;
+        const cell = GAME_CONFIG.CELL_SIZE;
+        const routeX = (route) => route * cell;
+        const state = {
+            gameState: GameState.PLAYING,
+            scrollSpeed: 100,
+            players: [
+                { id: 'me', color: PlayerColor.BLUE, position: { x: routeX(1), y: 120 }, isAlive: true, distance: 128 }
+            ],
+            obstacles: [
+                { id: 'o1', color: ObstacleColor.RED, position: { x: routeX(0), y: 300 }, width: cell, height: cell }
+            ]
+        };
+        this.currentState = state;
+        this.myPlayerId = 'me';
+        this.myPlayerColor = PlayerColor.BLUE;
+        this.roomId = 'debug-room';
+        this.renderer.resetAll();
+        this.renderer.setMyPlayer('me', PlayerColor.BLUE);
+        this.renderer.render(state);
+        this.statusBarRenderer?.render(state, 'me', 'debug-room', PlayerColor.BLUE);
+        // 绑定真实输入处理器（与对局中一致）
+        this.inputHandler.bind();
+        this.touchHandler.bind();
+        // 监听 InputMerger 发出的输入，记录到 window 供探针读取
+        const win = window;
+        win.__INPUT_LOG__ = [];
+        win.__TOUCH_LOG__ = [];
+        this.inputMerger.setInputObserver((input) => {
+            win.__INPUT_LOG__.push({ ...input });
+        });
+        const canvas = this.canvas;
+        for (const type of ['touchstart', 'touchmove', 'touchend']) {
+            canvas.addEventListener(type, () => {
+                win.__TOUCH_LOG__.push(type);
+            }, { passive: true });
+        }
     }
     /**
      * 帧耗时测量（仅调试用）

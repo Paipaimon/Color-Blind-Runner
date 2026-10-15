@@ -39,6 +39,8 @@ export class InputMerger {
     };
     // 移动次数统计回调
     onMoveCallback;
+    // 输入观察回调（仅调试用：观察合并后实际发出的输入）
+    onInputObserver;
     // 输入优先级配置
     // Requirements: 6.2 - 处理输入优先级，键盘和触控可以同时工作
     inputPriority = {
@@ -55,6 +57,13 @@ export class InputMerger {
      */
     setMoveCallback(callback) {
         this.onMoveCallback = callback;
+    }
+    /**
+     * 观察合并后实际发出的输入（仅调试用）
+     * 不改变任何输入行为，仅用于在浏览器内核验「触摸 → 输入」链路。
+     */
+    setInputObserver(observer) {
+        this.onInputObserver = observer;
     }
     /**
      * 更新键盘输入状态
@@ -114,6 +123,7 @@ export class InputMerger {
         const mergedInput = this.mergeInputs();
         if (this.hasMergedInputChanged(mergedInput)) {
             this.wsClient.sendInput(mergedInput);
+            this.onInputObserver?.(mergedInput);
             // 检查是否有新的移动输入（从无移动到有移动）
             const hadMovement = this.previousMergedInput.left || this.previousMergedInput.right ||
                 this.previousMergedInput.up || this.previousMergedInput.down;

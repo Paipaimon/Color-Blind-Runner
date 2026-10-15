@@ -93,12 +93,19 @@ export declare class GameLoop {
      */
     private handleCollision;
     /**
-     * 检查是否所有玩家都已死亡
+     * 检查游戏是否应该结束（最后一人存活即结束）
+     *
+     * 规则：
+     *  - 房间内有多名玩家时：存活玩家数 <= 1 即结束
+     *    · 恰有 1 名存活 → 该玩家为最后幸存者，本局结束
+     *    · 0 名存活 → 全员阵亡，本局同样结束
+     *  - 房间内只有 1 名玩家时：不套用上述规则，仅在该玩家死亡时结束，
+     *    避免开局瞬间因“存活人数 = 1”直接判定结束。
      *
      * @param room 游戏房间
-     * @returns 是否所有玩家都死亡
+     * @returns 是否应该结束本局
      */
-    private areAllPlayersDead;
+    private shouldEndGame;
     /**
      * 结束游戏
      *

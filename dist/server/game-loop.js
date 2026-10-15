@@ -148,7 +148,8 @@ export class GameLoop {
             this.handleCollision(room, collision);
         }
         // 7. 检查游戏是否结束 (Requirements 6.4)
-        if (this.areAllPlayersDead(room)) {
+        // 最后一名存活玩家产生（或全员阵亡）即结束本局
+        if (this.shouldEndGame(room)) {
             this.endGame(room);
         }
     }
@@ -173,13 +174,24 @@ export class GameLoop {
         }
     }
     /**
-     * 检查是否所有玩家都已死亡
+     * 检查游戏是否应该结束（最后一人存活即结束）
+     *
+     * 规则：
+     *  - 房间内有多名玩家时：存活玩家数 <= 1 即结束
+     *    · 恰有 1 名存活 → 该玩家为最后幸存者，本局结束
+     *    · 0 名存活 → 全员阵亡，本局同样结束
+     *  - 房间内只有 1 名玩家时：不套用上述规则，仅在该玩家死亡时结束，
+     *    避免开局瞬间因“存活人数 = 1”直接判定结束。
      *
      * @param room 游戏房间
-     * @returns 是否所有玩家都死亡
+     * @returns 是否应该结束本局
      */
-    areAllPlayersDead(room) {
-        return room.players.every(p => !p.alive);
+    shouldEndGame(room) {
+        const aliveCount = room.players.filter(p => p.alive).length;
+        if (room.players.length <= 1) {
+            return aliveCount === 0;
+        }
+        return aliveCount <= 1;
     }
     /**
      * 结束游戏
