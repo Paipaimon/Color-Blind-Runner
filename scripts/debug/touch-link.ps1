@@ -184,11 +184,29 @@ if ($Out -ne '') {
   }
 }
 
+$shape = Eval-Js -Expression "(function(){var cv=document.getElementById('gameCanvas');var r=cv.getBoundingClientRect();var ir=cv.width/cv.height;var cs=getComputedStyle(cv);var bl=parseFloat(cs.borderLeftWidth)||0;var bt=parseFloat(cs.borderTopWidth)||0;var cw=r.width-bl*2;var ch=r.height-bt*2;var dr=cw/ch;var dw=parseFloat(cv.dataset.displayWidth)||cw;var dh=parseFloat(cv.dataset.displayHeight)||ch;return JSON.stringify({internalRatio:+ir.toFixed(4),cssRatio:+dr.toFixed(4),dataRatio:+(dw/dh).toFixed(4),stretchPct:+(((dr/ir)-1)*100).toFixed(2),internal:cv.width+'x'+cv.height,css:Math.round(cw)+'x'+Math.round(ch),data:dw+'x'+dh,visualViewport:window.visualViewport?(Math.round(window.visualViewport.width)+'x'+Math.round(window.visualViewport.height)):'-',bodyClass:document.body.getAttribute('style')||'',zoom:window.outerWidth/window.innerWidth,stretchShown:+(((dr/ir)-1)*100).toFixed(3),stretchData:+(((dw/dh)/ir-1)*100).toFixed(3),border:bl+'/'+bt});})()"
+# 5) rapid consecutive swipes (regression: delayed reset must not cancel the next swipe)
+$null = Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];'
+$seq = @('right','left','right')
+foreach ($dirName in $seq) {
+  if ($dirName -eq 'right') { $fx = $sx; $tx = $ex } else { $fx = $ex; $tx = $sx }
+  Send-Touch -Type 'touchStart' -X $fx -Y $cy
+  Start-Sleep -Milliseconds 40
+  Send-Touch -Type 'touchMove' -X $tx -Y $cy
+  Start-Sleep -Milliseconds 40
+  Send-Touch -Type 'touchEnd' -X $tx -Y $cy
+  Start-Sleep -Milliseconds 120
+}
+Start-Sleep -Milliseconds 300
+$rapid = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:window.__INPUT_LOG__})'
+
 Write-Output ('METRICS=' + $metrics)
 Write-Output ('PLAY_LAYOUT=' + $playLayout)
+Write-Output ('SHAPE=' + $shape)
 Write-Output ('SWIPE_RIGHT_1ST=' + $swipeRight1)
 Write-Output ('SWIPE_RIGHT_2ND=' + $swipeRight2)
 Write-Output ('SWIPE_LEFT=' + $swipeLeft)
 Write-Output ('TAP_LEFT=' + $tapLeft)
+Write-Output ('RAPID_3=' + $rapid)
 
 $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, 'done', [Threading.CancellationToken]::None).Wait()

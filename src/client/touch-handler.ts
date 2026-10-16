@@ -24,7 +24,6 @@ enum SwipeDirection {
 interface TouchConfig {
   minSwipeDistance: number;  // 最小滑动距离(px)
   maxSwipeTime: number;      // 最大滑动时间(ms)
-  debounceTime: number;      // 防抖时间(ms)
   enableVerticalSwipe: boolean; // 是否启用垂直滑动
 }
 
@@ -55,16 +54,14 @@ export class TouchHandler {
   private readonly config: TouchConfig = {
     minSwipeDistance: 18,     // 拖动多久即判定为换道（越小越灵敏）
     maxSwipeTime: 800,        // 最大滑动时间(ms)，放宽到 800ms 兼容慢速拖动
-    debounceTime: 0,          // 拖动中即时触发，无需防抖
     enableVerticalSwipe: false // 当前游戏只需要左右移动
   };
 
   // 当前手势是否已经触发过换道（一次触摸只换一条道，避免连跳）
   private gestureConsumed: boolean = false;
-  
-  // 防抖相关
-  private lastInputTime: number = 0;
-  private debounceTimer: number | null = null;
+
+  // 延时重置定时器（仅用于兼容调试；正常流程走同步清空）
+  private resetTimer: number | null = null;
   
   // 绑定的事件处理函数引用（用于解绑）
   private touchStartHandler: (e: TouchEvent) => void;
@@ -119,17 +116,20 @@ export class TouchHandler {
     this.isBound = false;
     this.isEnabled = false;
     
-    // 清理防抖定时器
-    if (this.debounceTimer !== null) {
-      clearTimeout(this.debounceTimer);
-      this.debounceTimer = null;
-    }
+    // 清理延时重置定时器
+    this.clearResetTimer();
     
     // Requirements: 4.1 - 清理触控反馈
     this.feedbackManager.clearAllFeedbacks();
     
     // 重置输入状态
-    this.resetInput();
+    this.currentInput = {
+      up: false,
+      down: false,
+      left: false,
+      right: false
+    };
+    this.notifyInputMerger();
   }
 
   /**
@@ -167,6 +167,16 @@ export class TouchHandler {
     this.touchStartX = touch.clientX;
     this.touchStartY = touch.clientY;
     this.touchStartTime = Date.now();
+    // 新手势开始：清除上一次手势可能残留的输入与延时重置，
+    // 否则旧的 resetInput 定时器会在这一次滑动发送输入之后把它清掉，
+    // 造成「连续滑动时后面的滑动没反应」。
+    this.clearResetTimer();
+    this.currentInput = {
+      up: false,
+      down: false,
+      left: false,
+      right: false
+    };
     // 新手势开始：允许本次触摸触发一次换道
     this.gestureConsumed = false;
     
@@ -205,6 +215,8 @@ export class TouchHandler {
       this.gestureConsumed = true;
       this.showSwipeFeedback(touch.clientX, touch.clientY, direction);
       this.updateInputFromSwipe(direction);
+      // 拖动中即时换道并立即清空，保证下一次滑动从干净状态开始
+      this.resetInput();
     }
   }
 
@@ -217,6 +229,9 @@ export class TouchHandler {
     
     // Requirements: 1.4 - 阻止默认触摸行为
     event.preventDefault();
+
+    // 本次手势是否已在 touchmove 阶段触发过换道
+    const hadGesture = this.gestureConsumed;
     
     const currentTime = Date.now();
     const deltaTime = currentTime - this.touchStartTime;
@@ -233,10 +248,14 @@ export class TouchHandler {
     
     const deltaX = endX - this.touchStartX;
     const deltaY = endY - this.touchStartY;
-    
-    // 拖动阶段已经触发过换道：本次触摸不再重复触发
-    if (this.gestureConsumed) {
-      this.gestureConsumed = false;
+
+    // 输入只发一次脉冲，抬手时统一清掉，避免残留 left/right 影响下一次滑动
+    this.gestureConsumed = false;
+    this.clearResetTimer();
+
+    // 拖动阶段已经触发过换道：本次触摸不再重复触发，但必须清空输入
+    if (hadGesture) {
+      this.resetInput();
       return;
     }
     
@@ -247,7 +266,6 @@ export class TouchHandler {
       // Requirements: 4.1 - 显示触控反馈效果
       this.showSwipeFeedback(endX, endY, direction);
       this.updateInputFromSwipe(direction);
-      this.gestureConsumed = false;
       return;
     }
 
@@ -258,12 +276,9 @@ export class TouchHandler {
       if (tapDirection) {
         this.showSwipeFeedback(endX, endY, tapDirection);
         this.updateInputFromSwipe(tapDirection);
-        this.gestureConsumed = false;
         return;
       }
     }
-
-    this.gestureConsumed = false;
 
     // Requirements: 1.3 - 无有效滑动时停止发送移动命令
     this.resetInput();
@@ -359,12 +374,20 @@ export class TouchHandler {
     
     // Requirements: 5.1 - 使用防抖机制通知输入合并器
     this.notifyInputMerger();
-    
-    // 滑动手势是瞬时的，立即重置输入状态
-    // 这样可以避免持续发送移动命令
-    setTimeout(() => {
-      this.resetInput();
-    }, 100); // 短暂延迟确保输入被处理
+
+    // 说明：这里不再用 setTimeout 延时重置输入。
+    // 延时重置会在「连续快速滑动」时把下一次滑动刚发出的输入清掉，
+    // 导致后面的滑动没有反应；现在改为在 touchend / 下一次 touchstart 时同步清空。
+  }
+
+  /**
+   * 清除尚未执行的延时重置
+   */
+  private clearResetTimer(): void {
+    if (this.resetTimer !== null) {
+      clearTimeout(this.resetTimer);
+      this.resetTimer = null;
+    }
   }
 
   /**
@@ -383,36 +406,13 @@ export class TouchHandler {
 
   /**
    * 通知输入合并器触控输入状态变化
-   * Requirements: 5.1 - 防抖机制避免过度频繁输入
+   *
+   * 说明：InputMerger 内部已做「仅当合并结果变化时才发送」的去重，
+   * 因此这里不再叠加防抖定时器——多个定时器与「延时重置」叠在一起时，
+   * 会出现后一次滑动发出的输入被前一次的定时器清掉的问题。
    */
   private notifyInputMerger(): void {
-    const currentTime = Date.now();
-    
-    // Requirements: 5.1 - 防抖机制
-    if (currentTime - this.lastInputTime < this.config.debounceTime) {
-      // 清除之前的定时器
-      if (this.debounceTimer !== null) {
-        clearTimeout(this.debounceTimer);
-      }
-      
-      // 设置新的定时器
-      this.debounceTimer = window.setTimeout(() => {
-        this.doNotifyInputMerger();
-        this.debounceTimer = null;
-      }, this.config.debounceTime);
-      
-      return;
-    }
-    
-    this.doNotifyInputMerger();
-  }
-
-  /**
-   * 实际通知输入合并器
-   */
-  private doNotifyInputMerger(): void {
     this.inputMerger.updateTouchInput({ ...this.currentInput });
-    this.lastInputTime = Date.now();
   }
 
   /**

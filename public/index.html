@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0c11">
-  <!-- 站点图标：内联 SVG（四条车道色点），避免额外静态资源请求 -->
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1117'/%3E%3Crect x='7' y='5' width='18' height='4.4' rx='2.2' fill='%23ff4d6d'/%3E%3Crect x='7' y='11.2' width='18' height='4.4' rx='2.2' fill='%2335d07f'/%3E%3Crect x='7' y='17.4' width='18' height='4.4' rx='2.2' fill='%234d9dff'/%3E%3Crect x='7' y='23.6' width='18' height='4.4' rx='2.2' fill='%23ffd23f'/%3E%3C/svg%3E">
+  <!-- 站点图标：内联 SVG，四条竖向色带（与移动端竖屏赛道的方向一致） -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e1117'/%3E%3Crect x='5' y='7' width='4.4' height='18' rx='2.2' fill='%23ff4d6d'/%3E%3Crect x='11.2' y='7' width='4.4' height='18' rx='2.2' fill='%2335d07f'/%3E%3Crect x='17.4' y='7' width='4.4' height='18' rx='2.2' fill='%234d9dff'/%3E%3Crect x='23.6' y='7' width='4.4' height='18' rx='2.2' fill='%23ffd23f'/%3E%3C/svg%3E">
   <title>Color Blind Runner · 颜色盲区</title>
   <style>
     /* ==========================================================================
@@ -517,6 +517,16 @@
       touch-action: none;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
+    }
+
+    /* 触控设备（手机/平板）：去掉边框，避免 2px 边框参与显示尺寸导致内部比例与显示比例
+       出现细微偏差（表现为赛道被轻微拉伸）；圆角与边框只保留在桌面端。 */
+    @media (hover: none) and (pointer: coarse) {
+      #gameCanvas {
+        border: none;
+        border-radius: 0;
+      }
+      .touch-feedback-layer { border-radius: 0; }
     }
 
     /* 触控反馈层：覆盖画布，不拦截指针事件（touch-feedback.ts 注入元素） */

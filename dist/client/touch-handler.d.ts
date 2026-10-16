@@ -23,8 +23,7 @@ export declare class TouchHandler {
     private currentInput;
     private readonly config;
     private gestureConsumed;
-    private lastInputTime;
-    private debounceTimer;
+    private resetTimer;
     private touchStartHandler;
     private touchMoveHandler;
     private touchEndHandler;
@@ -84,19 +83,22 @@ export declare class TouchHandler {
      */
     private updateInputFromSwipe;
     /**
+     * 清除尚未执行的延时重置
+     */
+    private clearResetTimer;
+    /**
      * 重置输入状态
      * Requirements: 1.3 - 停止发送移动命令
      */
     private resetInput;
     /**
      * 通知输入合并器触控输入状态变化
-     * Requirements: 5.1 - 防抖机制避免过度频繁输入
+     *
+     * 说明：InputMerger 内部已做「仅当合并结果变化时才发送」的去重，
+     * 因此这里不再叠加防抖定时器——多个定时器与「延时重置」叠在一起时，
+     * 会出现后一次滑动发出的输入被前一次的定时器清掉的问题。
      */
     private notifyInputMerger;
-    /**
-     * 实际通知输入合并器
-     */
-    private doNotifyInputMerger;
     /**
      * 显示滑动反馈效果
      * Requirements: 4.1 - 提供视觉反馈指示移动方向

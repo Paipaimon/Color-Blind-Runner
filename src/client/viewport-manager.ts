@@ -201,13 +201,26 @@ export class ViewportManager {
 
     if (targetWidth >= 320 && (targetWidth !== this.lastCanvasWidth ||
         this.canvas.dataset.layout !== layoutMode)) {
+      // 保险：显示尺寸永不超过舞台可用区域。
+      // 一旦被 CSS 的 max-width/max-height 二次收窄，内部比例与显示比例就会不一致，
+      // 表现为赛道被拉伸；这里提前收敛，保证由本方法算出的尺寸就是最终尺寸。
+      const safeWidth = Math.min(targetWidth, Math.max(1, Math.floor(stageWidth)));
+      const safeHeight = Math.min(targetHeight, Math.max(1, Math.floor(stageHeight)));
+
       this.lastCanvasWidth = targetWidth;
-      this.canvas.style.width = `${targetWidth}px`;
-      this.canvas.style.height = `${targetHeight}px`;
+      this.canvas.style.width = `${safeWidth}px`;
+      this.canvas.style.height = `${safeHeight}px`;
       this.canvas.dataset.sizing = 'fixed';
       this.canvas.dataset.layout = layoutMode;
-      this.canvas.dataset.displayWidth = String(targetWidth);
-      this.canvas.dataset.displayHeight = String(targetHeight);
+      this.canvas.dataset.displayWidth = String(safeWidth);
+      this.canvas.dataset.displayHeight = String(safeHeight);
+
+      // 显示比例与内部逻辑比例是否一致（用于调试观察是否发生拉伸）
+      const internalRatio = layoutMode === 'mobile-portrait'
+        ? 720 / 1280
+        : 16 / 9;
+      const shownRatio = safeWidth / safeHeight;
+      this.canvas.dataset.stretch = (Math.abs(shownRatio / internalRatio - 1) * 100).toFixed(2);
     }
   }
 
