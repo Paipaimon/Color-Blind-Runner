@@ -57,8 +57,18 @@ export function computeLayoutParams(displayWidth, displayHeight) {
             scale: 1
         };
     }
+    // 移动端竖屏：宽度固定 720（沿用原逻辑宽），高度按真实显示比例推导。
+    //
+    // 关键约束（曾因此出现「方块延迟/提前消失」）：
+    // 服务端投影障碍物时用的是 GAME_HEIGHT(720) 作为可见窗口高度：
+    //   screenY = GAME_HEIGHT - (obstacle.y - viewWorldPosition + 1) * CELL_SIZE
+    // 并只下发 screenY ∈ [-CELL_SIZE, GAME_HEIGHT) 的障碍物。
+    // 若客户端内部高度（可视区域）明显高于 720，障碍物会在离玩家还很远的地方
+    // 就被过滤掉/清理掉，看起来就是「方块出现得晚、消失得早」。
+    // 因此这里让高度适配显示比例，使画布可视高度与服务端窗口一致。
     const internalWidth = 720;
-    const internalHeight = 1280;
+    const portraitRatio = displayHeight > 0 ? displayWidth / displayHeight : 9 / 16;
+    const internalHeight = Math.round(internalWidth / Math.max(0.1, portraitRatio));
     const laneWidthRatio = 0.98;
     const targetLaneWidth = internalWidth * laneWidthRatio;
     const logicalLaneWidth = GAME_CONFIG.GRID_COLS * GAME_CONFIG.CELL_SIZE; // 3 * 60 = 180

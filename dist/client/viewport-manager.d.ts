@@ -66,9 +66,11 @@ export declare class ViewportManager {
      */
     private applyCanvasWidth;
     /**
-     * 当前是否为「移动端触控设备 + 对局中 + 竖屏」
-     * 三者同时满足时界面框架会被隐藏（客户端在 .game-wrapper 上标记 data-playing），
-     * 画布需要改为铺满视口并贴底。
+     * 当前是否为「触控设备 + 对局中 + 竖屏」
+     *
+     * 竖屏判定用**画布实际显示比例**而不是 window.screen：
+     * 部分移动浏览器 / 全屏 / 分屏场景下 screen 尺寸与视口不一致，
+     * 会导致这里误判，从而选错画布尺寸策略。
      */
     private isMobilePlayStage;
     /**

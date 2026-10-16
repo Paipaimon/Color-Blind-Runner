@@ -50,7 +50,7 @@ function Send-Cdp {
   while ($true) {
     $seg = [ArraySegment[byte]]::new($script:buffer)
     $recv = $ws.ReceiveAsync($seg, [Threading.CancellationToken]::None)
-    if (-not $recv.Wait(20000)) { throw "recv timeout: $Method" }
+    if (-not $recv.Wait(45000)) { throw "recv timeout: $Method" }
     $res = $recv.Result
     $text = [Text.Encoding]::UTF8.GetString($script:buffer, 0, $res.Count)
     try { $msg = $text | ConvertFrom-Json } catch { continue }
@@ -111,7 +111,7 @@ $metrics = Eval-Js -Expression "(function(){var cv=document.getElementById('game
 # Enter the in-play UI state (hide HUD, track fills and sits at the bottom).
 # Real flow calls ViewportManager.refreshLayout(); emulate the relayout by
 # re-applying the device metrics, which triggers the same observer path.
-$null = Eval-Js -Expression "(function(){var w=document.querySelector('.game-wrapper');w.dataset.playing='true';document.body.dataset.playing='true';return 'applied';})()"
+$null = Eval-Js -Expression "(function(){var w=document.querySelector('.game-wrapper');w.dataset.playing='true';document.body.dataset.playing='true';if(window.__VIEWPORT__)window.__VIEWPORT__.refreshLayout();return 'applied';})()"
 
 $p = @{}
 $p['width'] = $Width; $p['height'] = ($Height - 1); $p['deviceScaleFactor'] = 3; $p['mobile'] = $true
@@ -122,7 +122,7 @@ $p['height'] = $Height
 Send-Cdp -Method 'Emulation.setDeviceMetricsOverride' -Params $p | Out-Null
 Start-Sleep -Milliseconds 600
 
-$playLayout = Eval-Js -Expression "(function(){var cv=document.getElementById('gameCanvas');var hd=document.querySelector('.game-header');var ft=document.querySelector('.game-footer');var bar=document.getElementById('statusBar');var r=cv.getBoundingClientRect();function vis(el){return el?getComputedStyle(el).display:'-'}return JSON.stringify({viewport:window.innerWidth+'x'+window.innerHeight,canvas:Math.round(r.left)+','+Math.round(r.top)+' '+Math.round(r.width)+'x'+Math.round(r.height),canvasFillRatio:+(r.width/window.innerWidth).toFixed(3),canvasBottomGap:Math.round(window.innerHeight-r.bottom),headerDisplay:vis(hd),statusBarDisplay:vis(bar),footerDisplay:vis(ft),display:cv.dataset.displayWidth+'x'+cv.dataset.displayHeight,layout:cv.dataset.layout});})()"
+$playLayout = Eval-Js -Expression "(function(){var cv=document.getElementById('gameCanvas');var hd=document.querySelector('.game-header');var ft=document.querySelector('.game-footer');var bar=document.getElementById('statusBar');var r=cv.getBoundingClientRect();function vis(el){return el?getComputedStyle(el).display:'-'}return JSON.stringify({viewport:window.innerWidth+'x'+window.innerHeight,canvas:Math.round(r.left)+','+Math.round(r.top)+' '+Math.round(r.width)+'x'+Math.round(r.height),canvasFillRatio:+(r.width/window.innerWidth).toFixed(3),canvasBottomGap:Math.round(window.innerHeight-r.bottom),headerDisplay:vis(hd),statusBarDisplay:vis(bar),footerDisplay:vis(ft),display:cv.dataset.displayWidth+'x'+cv.dataset.displayHeight,layout:cv.dataset.layout,overflow:cv.dataset.overflow,target:cv.dataset.target,stageDim:cv.dataset.stage,scale:cv.dataset.scale,offsetX:cv.dataset.offsetX,internalSize:cv.dataset.internalSize,stageH:Math.round(document.querySelector('.game-stage').clientHeight),winH:window.innerHeight});})()"
 
 $rect = (Eval-Js -Expression "(function(){var r=document.getElementById('gameCanvas').getBoundingClientRect();return JSON.stringify({l:r.left,t:r.top,w:r.width,h:r.height});})()") | ConvertFrom-Json
 
@@ -202,6 +202,7 @@ $rapid = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:
 
 Write-Output ('METRICS=' + $metrics)
 Write-Output ('PLAY_LAYOUT=' + $playLayout)
+Write-Output ('OBS_LAG=' + $obsLag)
 Write-Output ('SHAPE=' + $shape)
 Write-Output ('SWIPE_RIGHT_1ST=' + $swipeRight1)
 Write-Output ('SWIPE_RIGHT_2ND=' + $swipeRight2)

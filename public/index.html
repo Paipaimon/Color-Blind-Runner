@@ -810,9 +810,10 @@
         display: none;
       }
 
-      /* 赛道贴满整个可用高度，并沉到屏幕下方（玩家在底部，前方朝屏幕上方延伸） */
+      /* 对局中：赛道贴合整个视口（尺寸由 ViewportManager 按真实显示比例计算），
+         不再固定在底部——画布高度已等于视口高度，居中与贴底结果一致 */
       .game-wrapper[data-playing="true"] .game-stage {
-        align-items: flex-end;
+        align-items: center;
         width: 100%;
       }
 

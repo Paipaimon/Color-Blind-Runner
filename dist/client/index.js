@@ -140,6 +140,8 @@ class GameClient {
         // Requirements: 2.1, 2.2, 2.3, 2.4 - 初始化视口管理器
         this.viewportManager = new ViewportManager(canvas, statusBar, gameWrapper);
         this.viewportManager.init();
+        // 调试辅助：暴露实例，便于探针触发真实的 refreshLayout() 重排路径
+        window.__VIEWPORT__ = this.viewportManager;
         // Requirements: 3.1, 3.2, 3.3, 3.4, 3.5 - 初始化增强状态栏渲染器
         this.statusBarRenderer = new StatusBarRenderer(statusBar);
         // 设置移动次数统计回调
@@ -264,7 +266,8 @@ class GameClient {
         this.roomId = 'debug-room';
         this.renderer.resetAll();
         this.renderer.setMyPlayer('me', PlayerColor.BLUE);
-        this.renderer.render(state);
+        // 同步进入「对局中」界面态，使该调试页的布局与真实开局一致
+        this.setPlayingUiState(true);
         this.renderer.render(state);
         this.statusBarRenderer?.render(state, 'me', 'debug-room', PlayerColor.BLUE);
         // 绑定真实输入处理器（与对局中一致）
@@ -286,6 +289,7 @@ class GameClient {
         // 按帧采样渲染器状态：用于核验障碍物是否随取景连续移动（是否发生跳变/不同步）
         const winFrames = window;
         winFrames.__FRAMES__ = [];
+        winFrames.__FPS__ = { frames: 0, start: performance.now(), fps: 0 };
         const sample = () => {
             const snap = this.renderer.getDebugSnapshot();
             winFrames.__FRAMES__.push({
@@ -295,6 +299,14 @@ class GameClient {
                 obsWorldY: snap.topObstacleWorldY,
                 frames: snap.frameCount
             });
+            const fps = winFrames.__FPS__;
+            fps.frames++;
+            const elapsed = performance.now() - fps.start;
+            if (elapsed >= 1000) {
+                fps.fps = Number(((fps.frames * 1000) / elapsed).toFixed(1));
+                fps.frames = 0;
+                fps.start = performance.now();
+            }
             requestAnimationFrame(sample);
         };
         requestAnimationFrame(sample);

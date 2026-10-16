@@ -160,8 +160,19 @@ export class CanvasRenderer {
     this.cachedBackground = null;
     this.cachedVeil = null;
     if (this.canvas && (this.canvas.width !== this.width || this.canvas.height !== this.height)) {
+      // 重要：改写 canvas.width/height 会把画布清成透明黑。
+      // 已缓存的渐变是按旧上下文尺寸创建的，必须一并失效，否则首帧会有一部分
+      // 没被背景覆盖，看起来就是「顶部（或某处）一块黑」。
       this.canvas.width = this.width;
       this.canvas.height = this.height;
+      this.cachedBackground = null;
+      this.cachedVeil = null;
+    }
+    if (this.canvas) {
+      // 调试标记：本次采用的布局参数（便于真机核对赛道是否铺满）
+      this.canvas.dataset.scale = String(Number(this.scale.toFixed(4)));
+      this.canvas.dataset.offsetX = String(Number(this.offsetX.toFixed(2)));
+      this.canvas.dataset.internalSize = `${this.width}x${this.height}`;
     }
     return true;
   }
@@ -554,9 +565,17 @@ export class CanvasRenderer {
     // 添加新障碍物到缓存
     for (const obs of obstacles) {
       if (!this.obstacleCache.has(obs.id)) {
-        // 从屏幕坐标反算世界坐标
-        const playerY = this.height - this.cellSize;
-        const obstacleWorldY = worldY + (playerY - obs.position.y) / this.cellSize;
+        // 从屏幕坐标反算世界坐标。
+        //
+        // 关键：服务端投影障碍物用的是固定基准 (GAME_HEIGHT - CELL_SIZE)，
+        // 见 server/index.ts：
+        //   screenY = GAME_HEIGHT - (obstacle.y - viewWorldPosition + 1) * CELL_SIZE
+        // 因此这里必须用同一个基准做逆变换，否则两者相差
+        // (this.height - GAME_HEIGHT) / cellSize 个网格单位。
+        // 移动端竖屏内部高度是 1280（不是 720），若沿用 this.height，
+        // 反算出的世界坐标会偏 8.3 格，导致障碍物提前 / 延迟出现与消失。
+        const serverAnchorY = GAME_CONFIG.GAME_HEIGHT - this.cellSize;
+        const obstacleWorldY = worldY + (serverAnchorY - obs.position.y) / this.cellSize;
 
         this.obstacleCache.set(obs.id, {
           id: obs.id,
@@ -793,7 +812,12 @@ export class CanvasRenderer {
    */
   private renderWaitingScreen(_state: VisibleState): void {
     if (!this.ctx) return;
-    this.resetAll();
+
+    // 注意：这里不再调用 resetAll()。
+    // 等待画面在大厅阶段会被反复渲染，若每帧重置，会把「刚开局前」累积的
+    // scrollWorldY / 障碍物缓存 / gameStarted 反复清零，
+    // 造成开局瞬间取景与方块错位（看起来像方块延迟或错位）。
+    // 状态清理改由「重开一局 / 重新加入房间」时显式调用 resetAll() 负责。
 
     // 用单位矩阵绘制全屏渐变
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);

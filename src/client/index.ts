@@ -175,6 +175,9 @@ class GameClient {
     this.viewportManager = new ViewportManager(canvas, statusBar, gameWrapper);
     this.viewportManager.init();
 
+    // 调试辅助：暴露实例，便于探针触发真实的 refreshLayout() 重排路径
+    (window as unknown as { __VIEWPORT__?: ViewportManager }).__VIEWPORT__ = this.viewportManager;
+
     // Requirements: 3.1, 3.2, 3.3, 3.4, 3.5 - 初始化增强状态栏渲染器
     this.statusBarRenderer = new StatusBarRenderer(statusBar);
 
@@ -319,7 +322,10 @@ class GameClient {
 
     this.renderer.resetAll();
     this.renderer.setMyPlayer('me', PlayerColor.BLUE);
-    this.renderer.render(state);
+
+    // 同步进入「对局中」界面态，使该调试页的布局与真实开局一致
+    this.setPlayingUiState(true);
+
     this.renderer.render(state);
     this.statusBarRenderer?.render(state, 'me', 'debug-room', PlayerColor.BLUE);
 
@@ -355,8 +361,10 @@ class GameClient {
         obsWorldY: number | null;
         frames: number;
       }>;
+      __FPS__?: { frames: number; start: number; fps: number };
     };
     winFrames.__FRAMES__ = [];
+    winFrames.__FPS__ = { frames: 0, start: performance.now(), fps: 0 };
 
     const sample = () => {
       const snap = this.renderer.getDebugSnapshot();
@@ -367,6 +375,14 @@ class GameClient {
         obsWorldY: snap.topObstacleWorldY,
         frames: snap.frameCount
       });
+      const fps = winFrames.__FPS__!;
+      fps.frames++;
+      const elapsed = performance.now() - fps.start;
+      if (elapsed >= 1000) {
+        fps.fps = Number(((fps.frames * 1000) / elapsed).toFixed(1));
+        fps.frames = 0;
+        fps.start = performance.now();
+      }
       requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);

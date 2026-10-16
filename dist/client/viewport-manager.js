@@ -106,8 +106,14 @@ export class ViewportManager {
             return;
         }
         const height = stage.clientHeight;
-        if (height > 0 && Math.abs(height - this.lastStageHeight) >= 1) {
-            this.lastStageHeight = height;
+        if (height <= 0) {
+            return;
+        }
+        // 每次都写入当前实测高度：隐藏 HUD 后舞台会显著变高，
+        // 若沿用「变化 >= 1px 才更新」的阈值判断，配合 lastStageHeight 的旧值，
+        // 会让画布尺寸决策用到过期的舞台高度（表现为顶部留黑边、画布没铺满）。
+        this.lastStageHeight = height;
+        if (stage.style.getPropertyValue('--stage-h') !== `${height}px`) {
             stage.style.setProperty('--stage-h', `${height}px`);
         }
     }
@@ -135,11 +141,13 @@ export class ViewportManager {
         if (isMobilePortrait) {
             layoutMode = 'mobile-portrait';
             if (this.isMobilePlayStage()) {
-                // 对局中：界面框架已隐藏，赛道铺满宽度并贴底，
-                // 同时不超过「可用高度 × 9/16」以免溢出（平板等宽屏场景）。
-                const maxFitWidth = Math.max(320, Math.floor(stageHeight * (9 / 16)));
-                targetWidth = Math.max(320, Math.min(Math.floor(stageWidth), maxFitWidth));
-                targetHeight = Math.floor(targetWidth * (16 / 9));
+                // 对局中：赛道铺满整个视口（宽度占满、高度贴合真实显示比例）。
+                //
+                // 这里不再固定 9:16：内部高度由显示比例推导（见 computeLayoutParams），
+                // 使客户端可视高度与服务端障碍物投影窗口(720)保持一致，
+                // 避免障碍物在离玩家很远的位置就被过滤，表现为「方块延迟/提前消失」。
+                targetWidth = Math.max(320, Math.floor(stageWidth));
+                targetHeight = Math.max(320, Math.floor(stageHeight));
             }
             else {
                 // 非对局（大厅 / 结算）：原有逻辑，画布整体可见不裁切
@@ -161,16 +169,28 @@ export class ViewportManager {
         }
         if (targetWidth >= 320 && (targetWidth !== this.lastCanvasWidth ||
             this.canvas.dataset.layout !== layoutMode)) {
-            // 保险：显示尺寸永不超过舞台可用区域。
-            // 一旦被 CSS 的 max-width/max-height 二次收窄，内部比例与显示比例就会不一致，
-            // 表现为赛道被拉伸；这里提前收敛，保证由本方法算出的尺寸就是最终尺寸。
-            const safeWidth = Math.min(targetWidth, Math.max(1, Math.floor(stageWidth)));
-            const safeHeight = Math.min(targetHeight, Math.max(1, Math.floor(stageHeight)));
+            // 对局中的移动端竖屏：允许画布超出舞台高度并被 .game-wrapper 裁掉，
+            // 这样赛道铺满整屏宽度、玩家贴屏幕底部，不会在顶部留下黑边
+            //（此前的 min(targetHeight, stageHeight) 会留出 150px 左右的背景色空档，
+            //  看起来就是「顶部一个黑块」）。
+            const allowOverflow = layoutMode === 'mobile-portrait' && this.isMobilePlayStage();
+            // 其余情况仍收敛到舞台内，避免被 CSS 的 max-width/max-height 二次收窄
+            // 导致内部比例与显示比例不一致（表现为赛道被拉伸）。
+            const safeWidth = allowOverflow
+                ? targetWidth
+                : Math.min(targetWidth, Math.max(1, Math.floor(stageWidth)));
+            const safeHeight = allowOverflow
+                ? targetHeight
+                : Math.min(targetHeight, Math.max(1, Math.floor(stageHeight)));
             this.lastCanvasWidth = targetWidth;
             this.canvas.style.width = `${safeWidth}px`;
             this.canvas.style.height = `${safeHeight}px`;
             this.canvas.dataset.sizing = 'fixed';
             this.canvas.dataset.layout = layoutMode;
+            // 调试标记：本次尺寸决策的来源（便于真机排查黑边/裁切问题）
+            this.canvas.dataset.overflow = allowOverflow ? 'yes' : 'no';
+            this.canvas.dataset.target = `${targetWidth}x${targetHeight}`;
+            this.canvas.dataset.stage = `${Math.floor(stageWidth)}x${Math.floor(stageHeight)}`;
             this.canvas.dataset.displayWidth = String(safeWidth);
             this.canvas.dataset.displayHeight = String(safeHeight);
             // 显示比例与内部逻辑比例是否一致（用于调试观察是否发生拉伸）
@@ -182,19 +202,25 @@ export class ViewportManager {
         }
     }
     /**
-     * 当前是否为「移动端触控设备 + 对局中 + 竖屏」
-     * 三者同时满足时界面框架会被隐藏（客户端在 .game-wrapper 上标记 data-playing），
-     * 画布需要改为铺满视口并贴底。
+     * 当前是否为「触控设备 + 对局中 + 竖屏」
+     *
+     * 竖屏判定用**画布实际显示比例**而不是 window.screen：
+     * 部分移动浏览器 / 全屏 / 分屏场景下 screen 尺寸与视口不一致，
+     * 会导致这里误判，从而选错画布尺寸策略。
      */
     isMobilePlayStage() {
         const touchDevice = (typeof window.matchMedia === 'function' &&
             window.matchMedia('(hover: none) and (pointer: coarse)').matches) ||
             this.deviceInfo.isMobile ||
             this.deviceInfo.isTablet;
-        if (!touchDevice || this.deviceInfo.orientation !== 'portrait') {
+        if (!touchDevice) {
             return false;
         }
-        return this.gameWrapper.dataset.playing === 'true';
+        if (this.gameWrapper.dataset.playing !== 'true') {
+            return false;
+        }
+        // 竖屏：宽度小于高度即视为竖屏（与 computeLayoutParams 的判定保持一致）
+        return window.innerWidth <= window.innerHeight;
     }
     /**
      * 重新量取布局（供外部在 DOM/HUD 结构变化后调用）
