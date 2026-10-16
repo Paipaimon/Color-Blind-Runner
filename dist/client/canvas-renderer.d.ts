@@ -33,6 +33,9 @@ export declare class CanvasRenderer {
     private scrollWorldY;
     private cachedBackground;
     private cachedVeil;
+    private frameCount;
+    private warnedMissingPlayer;
+    private prevServerWorldY;
     constructor();
     init(canvas: HTMLCanvasElement): void;
     /**
@@ -158,6 +161,19 @@ export declare class CanvasRenderer {
     getSize(): {
         width: number;
         height: number;
+    };
+    /**
+     * 调试只读快照：当前取景位置与最前方障碍物的屏幕位置
+     *
+     * 用于核验「障碍物是否随取景平滑移动」：若在两次状态广播之间该值连续变化，
+     * 说明插值推帧生效；若呈脉冲式跳变则说明画面只在广播到达时更新。
+     * 不参与游戏逻辑，仅读取渲染器内部缓存。
+     */
+    getDebugSnapshot(): {
+        cameraWorldY: number;
+        topObstacleScreenY: number | null;
+        topObstacleWorldY: number | null;
+        frameCount: number;
     };
 }
 //# sourceMappingURL=canvas-renderer.d.ts.map

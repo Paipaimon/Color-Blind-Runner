@@ -76,6 +76,12 @@ export class CanvasRenderer {
     // 背景渐变缓存（尺寸不变时复用，避免每帧重建 CanvasGradient）
     cachedBackground = null;
     cachedVeil = null;
+    // 已渲染帧数（仅用于调试观测渲染节奏）
+    frameCount = 0;
+    // 是否已就「找不到本机玩家」告警过（避免每帧刷日志）
+    warnedMissingPlayer = false;
+    // 上一帧服务端下发的取景位置（本机玩家缺失时作为回退基准）
+    prevServerWorldY = 0;
     constructor() {
         this.layoutParams = computeLayoutParams(GAME_CONFIG.GAME_WIDTH, GAME_CONFIG.GAME_HEIGHT);
     }
@@ -150,7 +156,16 @@ export class CanvasRenderer {
     render(state, worldYOverride) {
         if (!this.ctx)
             return;
+        this.frameCount++;
         this.applyLayoutFromCanvas();
+        // 调试：记录每帧的取景位置变化（仅当 __SYNC_TRACE__ 打开时）
+        if (window.__SYNC_TRACE__) {
+            const before = this.scrollWorldY;
+            // eslint-disable-next-line no-console
+            console.log(`[render] state=${state.gameState} override=${worldYOverride ?? 'none'} ` +
+                `scrollBefore=${before.toFixed(3)} found=${state.players.some(p => p.id === this.myPlayerId)} ` +
+                `myId=${this.myPlayerId}`);
+        }
         // 背景用单位矩阵绘制（覆盖整个画布），赛道内容用缩放矩阵绘制
         this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.clear();
@@ -327,11 +342,27 @@ export class CanvasRenderer {
      */
     renderGame(state, worldYOverride) {
         const myPlayer = state.players.find(p => p.id === this.myPlayerId);
-        if (!myPlayer)
-            return;
-        // 取景位置：默认用服务端坐标，插值时用本地推算的平滑位置
-        const worldY = worldYOverride ?? myPlayer.position.y;
-        const newCol = Math.floor(myPlayer.position.x / this.cellSize);
+        // 取景位置：优先用插值结果，其次本机玩家坐标。
+        // 注意：这里不能因为「找不到本机玩家」就直接 return——那会让网格取景停在旧值，
+        // 而障碍物仍按新坐标绘制，表现为「方块与格子不同步」。因此改为回退到可用坐标继续渲染。
+        const cameraFromState = myPlayer ? myPlayer.position.y : this.scrollWorldY;
+        const worldY = worldYOverride ?? cameraFromState;
+        if (!myPlayer) {
+            // 理论上不会发生（服务端始终下发本机玩家）；仅记录一次以便真机排查
+            if (!this.warnedMissingPlayer) {
+                this.warnedMissingPlayer = true;
+                console.warn('[CanvasRenderer] 本机玩家不在状态中，已回退渲染取景', {
+                    myPlayerId: this.myPlayerId,
+                    playerIds: state.players.map(p => p.id)
+                });
+            }
+        }
+        else {
+            this.warnedMissingPlayer = false;
+        }
+        const newCol = myPlayer
+            ? Math.floor(myPlayer.position.x / this.cellSize)
+            : this.currentCol;
         // 初始化起始位置
         if (!this.gameStarted) {
             this.startWorldY = worldY;
@@ -339,21 +370,28 @@ export class CanvasRenderer {
         }
         // 记录当前世界位置（网格换算与障碍物使用同一坐标系）
         this.scrollWorldY = worldY;
+        this.prevServerWorldY = cameraFromState;
         // 检测玩家死亡
-        if (!myPlayer.isAlive && !this.isDead) {
+        if (myPlayer && !myPlayer.isAlive && !this.isDead) {
             this.isDead = true;
             // 使用服务器发送的距离，如果没有则使用本地计算的距离
             this.deathDistance = myPlayer.distance ?? Math.floor(worldY - this.startWorldY);
         }
-        // 计算距离：死亡后使用死亡时的距离
+        // 距离：始终按当前取景位置计算，保证读数与画面同步推进；
+        // 服务端在广播中给出权威 distance 时以其为基准把误差归零（不产生回退）。
         if (this.isDead) {
             this.distance = this.deathDistance;
         }
-        else {
-            this.distance = myPlayer.distance ?? Math.floor(worldY - this.startWorldY);
+        else if (myPlayer && myPlayer.distance !== undefined) {
+            const cameraDistance = Math.round(worldY - this.startWorldY);
+            this.distance = Math.max(this.distance, Math.min(myPlayer.distance, cameraDistance));
         }
-        // 更新障碍物缓存：始终使用服务端坐标建立缓存，保证世界坐标准确
-        this.updateObstacleCache(state.obstacles, myPlayer.position.y);
+        else {
+            this.distance = Math.round(worldY - this.startWorldY);
+        }
+        // 更新障碍物缓存：用「本机玩家的服务端坐标」建立缓存（世界坐标必须来自服务端）。
+        // 本机玩家缺失时退回上一帧取景位置，保证缓存仍在同一坐标系下推进。
+        this.updateObstacleCache(state.obstacles, myPlayer ? myPlayer.position.y : this.prevServerWorldY);
         // 检测是否靠近自己颜色的障碍物（使用服务器发送的proximityHints）
         this.checkDanger(state.proximityHints);
         // 先渲染路径（在障碍物下面）
@@ -796,6 +834,28 @@ export class CanvasRenderer {
     }
     getSize() {
         return { width: this.width, height: this.height };
+    }
+    /**
+     * 调试只读快照：当前取景位置与最前方障碍物的屏幕位置
+     *
+     * 用于核验「障碍物是否随取景平滑移动」：若在两次状态广播之间该值连续变化，
+     * 说明插值推帧生效；若呈脉冲式跳变则说明画面只在广播到达时更新。
+     * 不参与游戏逻辑，仅读取渲染器内部缓存。
+     */
+    getDebugSnapshot() {
+        let top = null;
+        for (const obs of this.obstacleCache.values()) {
+            if (!top || obs.worldY > top.worldY) {
+                top = obs;
+            }
+        }
+        const playerY = this.height - this.cellSize;
+        return {
+            cameraWorldY: this.scrollWorldY,
+            topObstacleScreenY: top ? playerY - (top.worldY - this.scrollWorldY) * this.cellSize : null,
+            topObstacleWorldY: top ? top.worldY : null,
+            frameCount: this.frameCount
+        };
     }
 }
 //# sourceMappingURL=canvas-renderer.js.map

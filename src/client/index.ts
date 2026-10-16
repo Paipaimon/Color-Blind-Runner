@@ -278,6 +278,12 @@ class GameClient {
       return;
     }
 
+    // 调试辅助：?debug=sync 用真实推帧逻辑诊断「方块是否随取景同步移动」
+    if (debugMode === 'sync') {
+      this.runSyncDiagnosis();
+      return;
+    }
+
     // 连接服务器
     await this.connect();
   }
@@ -314,6 +320,7 @@ class GameClient {
     this.renderer.resetAll();
     this.renderer.setMyPlayer('me', PlayerColor.BLUE);
     this.renderer.render(state);
+    this.renderer.render(state);
     this.statusBarRenderer?.render(state, 'me', 'debug-room', PlayerColor.BLUE);
 
     // 绑定真实输入处理器（与对局中一致）
@@ -338,6 +345,167 @@ class GameClient {
         win.__TOUCH_LOG__!.push(type);
       }, { passive: true });
     }
+
+    // 按帧采样渲染器状态：用于核验障碍物是否随取景连续移动（是否发生跳变/不同步）
+    const winFrames = window as unknown as {
+      __FRAMES__?: Array<{
+        t: number;
+        camera: number;
+        obsY: number | null;
+        obsWorldY: number | null;
+        frames: number;
+      }>;
+    };
+    winFrames.__FRAMES__ = [];
+
+    const sample = () => {
+      const snap = this.renderer.getDebugSnapshot();
+      winFrames.__FRAMES__!.push({
+        t: performance.now(),
+        camera: snap.cameraWorldY,
+        obsY: snap.topObstacleScreenY,
+        obsWorldY: snap.topObstacleWorldY,
+        frames: snap.frameCount
+      });
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }
+
+  /**
+   * 方块同步诊断（仅调试用，?debug=sync）
+   *
+   * 用真实的广播间推帧逻辑连续渲染若干秒，并按帧记录：
+   *   - 取景位置（相机）走过的位移
+   *   - 最前方障碍物的屏幕位置与屏幕位移
+   * 若两者逐帧变化且比值稳定，说明方块与网格同步推进；
+   * 若出现「多数帧位移为 0、个别帧大幅跳变」，说明画面只在广播到达时更新（不同步）。
+   */
+  private runSyncDiagnosis(durationMs: number = 3000): void {
+    const cell = GAME_CONFIG.CELL_SIZE;
+    const routeX = (route: number) => route * cell;
+
+    // 模拟对局：玩家在中道，前方 6 行有一列障碍物（世界坐标固定）
+    const makeState = (worldY: number): VisibleState => ({
+      gameState: GameState.PLAYING,
+      scrollSpeed: 100,
+      players: [
+        {
+          id: 'me',
+          color: PlayerColor.BLUE,
+          position: { x: routeX(1), y: worldY },
+          isAlive: true,
+          distance: Math.floor(worldY - 100)
+        }
+      ],
+      obstacles: [0, 2, 4, 6, 8].map((row, i) => ({
+        id: `o${i}`,
+        color: i % 2 === 0 ? ObstacleColor.RED : ObstacleColor.GREEN,
+        position: { x: routeX(i % 3), y: 300 - row * cell },
+        width: cell,
+        height: cell
+      }))
+    });
+
+    // 与运行时一致的世界速度：服务端 WORLD_SPEED = 3 行/秒
+    const worldSpeed = 3;
+    const frameMs = 1000 / 60;
+    const broadcastMs = 50; // 服务端 20Hz 广播
+
+    // 必须先把本机玩家绑定到渲染器，否则 renderGame 会因找不到自己而整帧跳过
+    // （只画背景与网格，不画路径/障碍物/距离，表现为画面不同步）
+    this.myPlayerId = 'me';
+    this.myPlayerColor = PlayerColor.BLUE;
+    this.renderer.resetAll();
+    this.renderer.setMyPlayer('me', PlayerColor.BLUE);
+
+    // 同步推演：不依赖 requestAnimationFrame，便于在无头环境直接读取结果。
+    // 逐帧（16.67ms）按客户端真实逻辑外推取景，每 50ms 才收到一次「广播」。
+    const totalFrames = Math.round(durationMs / frameMs);
+    let simulated = 0;
+    let broadcastAt = 0;
+    let serverWorldY = 100;
+    let cameraY = 100;
+
+    // 打开渲染器内部的逐帧跟踪日志（仅本次诊断）
+    (window as unknown as { __SYNC_TRACE__?: boolean }).__SYNC_TRACE__ = true;
+
+    const samples: Array<{ camera: number; obsY: number | null }> = [];
+
+    for (let i = 0; i < totalFrames; i++) {
+      simulated += frameMs;
+
+      if (simulated - broadcastAt >= broadcastMs) {
+        const elapsed = (simulated - broadcastAt) / 1000;
+        serverWorldY += worldSpeed * elapsed;
+        broadcastAt = simulated;
+      }
+
+      // 与客户端 startCanvasAnimation 一致：按帧步进，且不超过服务端权威位置
+      const beforeCam = cameraY;
+      cameraY = Math.min(cameraY + worldSpeed * (frameMs / 1000), serverWorldY);
+
+      this.renderer.render(makeState(serverWorldY), cameraY);
+      const snap = this.renderer.getDebugSnapshot();
+      samples.push({ camera: snap.cameraWorldY, obsY: snap.topObstacleScreenY });
+
+      // 前若干帧输出原始中间量，便于定位「取景未推进」的原因
+      if (i < 5) {
+        const st = makeState(serverWorldY);
+        console.log(
+          `[sync-trace] i=${i} cameraIn=${beforeCam.toFixed(3)}->${cameraY.toFixed(3)} ` +
+          `serverY=${serverWorldY.toFixed(3)} snapCamera=${snap.cameraWorldY.toFixed(3)} ` +
+          `snapObsY=${snap.topObstacleScreenY} frames=${snap.frameCount} ` +
+          `statePlayer=${st.players[0].id} myPlayerId=${this.myPlayerId}`
+        );
+      }
+    }
+
+    // 统计：相邻帧的取景位移与障碍物屏幕位移
+    let zeroCamera = 0;
+    let zeroObs = 0;
+    let maxCamStep = 0;
+    let maxObsStep = 0;
+    const ratios: number[] = [];
+
+    for (let i = 1; i < samples.length; i++) {
+      const dCam = Math.abs(samples[i].camera - samples[i - 1].camera);
+      const a = samples[i - 1].obsY;
+      const b = samples[i].obsY;
+      const dObs = a !== null && b !== null ? Math.abs(b - a) : 0;
+
+      if (dCam < 1e-6) zeroCamera++;
+      if (dObs < 1e-6) zeroObs++;
+      if (dCam > maxCamStep) maxCamStep = dCam;
+      if (dObs > maxObsStep) maxObsStep = dObs;
+      if (dCam > 1e-6) ratios.push(dObs / dCam);
+    }
+
+    const avgRatio = ratios.length > 0
+      ? ratios.reduce((s, v) => s + v, 0) / ratios.length
+      : 0;
+    // 期望比值：障碍物屏幕位移 = 取景位移 × cellSize
+    const expectedRatio = cell;
+
+    const report = {
+      frames: samples.length,
+      zeroCameraSteps: zeroCamera,
+      zeroObstacleSteps: zeroObs,
+      maxCameraStep: Number(maxCamStep.toFixed(3)),
+      maxObstacleStep: Number(maxObsStep.toFixed(2)),
+      avgObsPerCamera: Number(avgRatio.toFixed(2)),
+      expectedObsPerCamera: expectedRatio,
+      ratioErrorPct: Number((Math.abs(avgRatio / expectedRatio - 1) * 100).toFixed(3)),
+      synced: zeroObs / Math.max(1, samples.length - 1) < 0.05 &&
+              Math.abs(avgRatio / expectedRatio - 1) < 0.02
+    };
+
+    const out = document.createElement('div');
+    out.id = 'syncProbe';
+    out.style.display = 'none';
+    out.textContent = JSON.stringify(report);
+    document.body.appendChild(out);
+    console.log('[sync]', JSON.stringify(report));
   }
 
   /**
