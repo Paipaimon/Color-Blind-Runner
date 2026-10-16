@@ -66,6 +66,17 @@ export declare class ViewportManager {
      */
     private applyCanvasWidth;
     /**
+     * 当前是否为「移动端触控设备 + 对局中 + 竖屏」
+     * 三者同时满足时界面框架会被隐藏（客户端在 .game-wrapper 上标记 data-playing），
+     * 画布需要改为铺满视口并贴底。
+     */
+    private isMobilePlayStage;
+    /**
+     * 重新量取布局（供外部在 DOM/HUD 结构变化后调用）
+     * 例如移动端进入对局隐藏 HUD、进出全屏后视口尺寸变化时。
+     */
+    refreshLayout(): void;
+    /**
      * 调整画布显示尺寸
      * 显示尺寸由 applyCanvasWidth 直接写入（宽 + 高 + 内部分辨率同步），
      * 保证在任何视口下都严格保持 16:9，不依赖 CSS 对 canvas 固有比例的推导。

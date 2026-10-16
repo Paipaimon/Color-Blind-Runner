@@ -134,6 +134,8 @@
       height: 100dvh;
       padding: clamp(8px, 1.6vh, 18px) clamp(10px, 1.6vw, 22px);
       overflow: hidden;
+      /* 兜底底色：全屏/移动端无边框画布时，四周与画布同色不露白 */
+      background: var(--c-bg-0);
     }
 
     /* 顶部：品牌标识 */
@@ -779,6 +781,36 @@
       }
       .touch-feedback-layer { border-radius: 0; }
       .game-stage::before { display: none; }
+    }
+
+    /* --------------------------------------------------------------------------
+       移动端对局中：隐藏全部界面框架，赛道占满整屏
+       .game-wrapper[data-playing="true"] 由客户端在对局期间设置
+       -------------------------------------------------------------------------- */
+    @media (hover: none) and (pointer: coarse) {
+      /* 对局中收起品牌栏 / 状态栏 / 底部操作区，只留赛道本身 */
+      .game-wrapper[data-playing="true"] {
+        gap: 0;
+        padding: 0;
+      }
+
+      .game-wrapper[data-playing="true"] .game-header,
+      .game-wrapper[data-playing="true"] .game-footer,
+      .game-wrapper[data-playing="true"] #statusBar {
+        display: none;
+      }
+
+      /* 赛道贴满整个可用高度，并沉到屏幕下方（玩家在底部，前方朝屏幕上方延伸） */
+      .game-wrapper[data-playing="true"] .game-stage {
+        align-items: flex-end;
+        width: 100%;
+      }
+
+      /* 进入全屏后由真实视口高度决定尺寸（见 ViewportManager） */
+      body[data-fullscreen="true"] .game-wrapper {
+        height: 100vh;
+        height: 100dvh;
+      }
     }
 
     @media (prefers-reduced-motion: reduce) {

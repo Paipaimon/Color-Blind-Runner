@@ -208,8 +208,12 @@ class GameClient {
     }
 
     // 操作按钮：准备 / 重开的主要入口
+    // 移动端在这里请求全屏：必须发生在用户手势中，且能顺带隐藏浏览器底部工具栏
     if (this.actionBtn) {
-      this.actionBtn.addEventListener('click', () => this.handleReadyAction());
+      this.actionBtn.addEventListener('click', () => {
+        this.requestMobileFullscreen();
+        this.handleReadyAction();
+      });
     }
 
     // 触控设备上点击画布同样视为一次操作（保持原有触控体验）
@@ -217,11 +221,18 @@ class GameClient {
 
     // 触屏点击画布：仅在非进行中状态下触发操作，避免与滑动操作冲突
     canvas.addEventListener('touchend', () => {
+      this.requestMobileFullscreen();
       if (!this.currentState) return;
       if (this.currentState.gameState === GameState.WAITING ||
           this.currentState.gameState === GameState.GAME_OVER) {
         this.handleReadyAction();
       }
+    });
+
+    // 全屏状态变化：重新量取视口，保证赛道尺寸随之更新
+    document.addEventListener('fullscreenchange', () => {
+      document.body.dataset.fullscreen = document.fullscreenElement ? 'true' : 'false';
+      this.viewportManager?.refreshLayout();
     });
 
     // 切换后台时，冻结状态栏时间动画（避免累积误差与无意义绘制）
@@ -740,6 +751,9 @@ class GameClient {
     // 启动画面推帧：广播之间按显示刷新率补帧
     this.startCanvasAnimation();
 
+    // 移动端：隐藏 HUD，赛道占满整屏
+    this.setPlayingUiState(true);
+
     if (this.currentState && this.statusBarRenderer && this.myPlayerId) {
       this.statusBarRenderer.render(this.currentState, this.myPlayerId, this.roomId || undefined, this.myPlayerColor || undefined);
     }
@@ -770,6 +784,10 @@ class GameClient {
       this.statusBarRenderer.render(message.finalState, this.myPlayerId, this.roomId || undefined, this.myPlayerColor || undefined);
       this.statusBarRenderer.stopAnimation();
     }
+
+    // 结算需要看到成绩与「重新开始」按钮，恢复 HUD 并退出全屏
+    this.setPlayingUiState(false);
+    this.exitMobileFullscreen();
 
     this.refreshActionButton();
   }
@@ -838,6 +856,91 @@ class GameClient {
     this.currentState = defaultState;
     this.renderer.render(defaultState);
     this.refreshActionButton();
+  }
+
+  /**
+   * 判断是否为移动端触控设备
+   * 用媒体查询而不是 UA：桌面浏览器开触控仿真、平板、手机都能正确命中。
+   */
+  private isTouchMobile(): boolean {
+    if (typeof window.matchMedia === 'function' &&
+        window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
+      return true;
+    }
+    return /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent);
+  }
+
+  /**
+   * 请求全屏（仅移动端）
+   *
+   * 目的：全屏后浏览器会自动隐藏地址栏与底部工具栏（Edge 安卓版同样如此），
+   * 配合隐藏页面内 HUD，赛道得以占满整屏。
+   * 必须在用户手势（点击 / 触摸）中调用，否则会被浏览器拒绝；
+   * 被拒绝或设备不支持时静默忽略，不影响游戏。
+   */
+  private requestMobileFullscreen(): void {
+    if (!this.isTouchMobile() || document.fullscreenElement) {
+      return;
+    }
+
+    const target = document.querySelector('.game-wrapper') as HTMLElement | null;
+    if (!target || typeof target.requestFullscreen !== 'function') {
+      return;
+    }
+
+    try {
+      // 不传参数：navigationUI 选项在部分引擎会抛 TypeError，
+      // 而不带参数的 requestFullscreen() 在所有支持全屏的浏览器上都可用，
+      // 且同样会隐藏地址栏与底部工具栏。
+      const result = target.requestFullscreen() as unknown as Promise<void> | undefined;
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => {
+          /* 浏览器拒绝（非手势/策略限制）时忽略 */
+        });
+      }
+    } catch {
+      /* 不支持全屏时忽略 */
+    }
+  }
+
+  /**
+   * 退出全屏（仅移动端）
+   * 结算时需要显示成绩与「重新开始」按钮，全屏会遮挡页面控件。
+   */
+  private exitMobileFullscreen(): void {
+    if (!document.fullscreenElement) {
+      document.body.dataset.fullscreen = 'false';
+      return;
+    }
+    try {
+      const result = document.exitFullscreen() as unknown as Promise<void> | undefined;
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => { /* 忽略 */ });
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }
+
+  /**
+   * 设置对局中标记
+   * 移动端据此隐藏品牌栏 / 状态栏 / 底部操作区，让赛道占满屏幕；
+   * 桌面端不受影响（样式表按触控设备限定）。
+   */
+  private setPlayingUiState(playing: boolean): void {
+    const wrapper = document.querySelector('.game-wrapper') as HTMLElement | null;
+    if (!wrapper) return;
+
+    if (playing) {
+      wrapper.dataset.playing = 'true';
+      document.body.dataset.playing = 'true';
+    } else {
+      delete wrapper.dataset.playing;
+      delete document.body.dataset.playing;
+    }
+
+    // HUD 显隐会改变舞台高度，立即重新量取画布尺寸
+    this.viewportManager?.refreshLayout();
   }
 
   /**

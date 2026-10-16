@@ -173,14 +173,24 @@ export class ViewportManager {
     let layoutMode: string;
 
     if (isMobilePortrait) {
-      targetWidth = Math.max(320, Math.floor(stageWidth));
-      const portraitHeight = Math.floor(targetWidth * (16 / 9));
-      targetHeight = Math.min(portraitHeight, Math.floor(stageHeight));
-      const fitBackWidth = Math.floor(targetHeight * (9 / 16));
-      if (fitBackWidth < targetWidth && fitBackWidth >= 320) {
-        targetWidth = fitBackWidth;
-      }
       layoutMode = 'mobile-portrait';
+
+      if (this.isMobilePlayStage()) {
+        // 对局中：界面框架已隐藏，赛道铺满宽度并贴底，
+        // 同时不超过「可用高度 × 9/16」以免溢出（平板等宽屏场景）。
+        const maxFitWidth = Math.max(320, Math.floor(stageHeight * (9 / 16)));
+        targetWidth = Math.max(320, Math.min(Math.floor(stageWidth), maxFitWidth));
+        targetHeight = Math.floor(targetWidth * (16 / 9));
+      } else {
+        // 非对局（大厅 / 结算）：原有逻辑，画布整体可见不裁切
+        targetWidth = Math.max(320, Math.floor(stageWidth));
+        const portraitHeight = Math.floor(targetWidth * (16 / 9));
+        targetHeight = Math.min(portraitHeight, Math.floor(stageHeight));
+        const fitBackWidth = Math.floor(targetHeight * (9 / 16));
+        if (fitBackWidth < targetWidth && fitBackWidth >= 320) {
+          targetWidth = fitBackWidth;
+        }
+      }
     } else {
       const horizontalPadding = 8;
       const heightLimit = stageHeight;
@@ -199,6 +209,37 @@ export class ViewportManager {
       this.canvas.dataset.displayWidth = String(targetWidth);
       this.canvas.dataset.displayHeight = String(targetHeight);
     }
+  }
+
+  /**
+   * 当前是否为「移动端触控设备 + 对局中 + 竖屏」
+   * 三者同时满足时界面框架会被隐藏（客户端在 .game-wrapper 上标记 data-playing），
+   * 画布需要改为铺满视口并贴底。
+   */
+  private isMobilePlayStage(): boolean {
+    const touchDevice =
+      (typeof window.matchMedia === 'function' &&
+        window.matchMedia('(hover: none) and (pointer: coarse)').matches) ||
+      this.deviceInfo.isMobile ||
+      this.deviceInfo.isTablet;
+
+    if (!touchDevice || this.deviceInfo.orientation !== 'portrait') {
+      return false;
+    }
+
+    return this.gameWrapper.dataset.playing === 'true';
+  }
+
+  /**
+   * 重新量取布局（供外部在 DOM/HUD 结构变化后调用）
+   * 例如移动端进入对局隐藏 HUD、进出全屏后视口尺寸变化时。
+   */
+  refreshLayout(): void {
+    this.deviceInfo = this.detectDevice();
+    // 强制重算：隐藏 HUD 后舞台尺寸会变，缓存宽度需要失效
+    this.lastCanvasWidth = 0;
+    this.updateStageHeight();
+    this.handleResize();
   }
 
   /**

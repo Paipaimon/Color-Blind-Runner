@@ -1,10 +1,12 @@
-# 触控链路探针（调试辅助，不参与构建与游戏运行）
+﻿# Touch link probe (debug helper; not part of build or runtime).
 #
-# 作用：以移动端竖屏打开 ?debug=touch（客户端进入对局并绑定真实触控处理器），
-#      派发合成手指滑动，读取页面的触摸事件日志与 InputMerger 输出日志，
-#      用来判断「手指滑动 → 玩家输入」这段链路是否通。
+# Opens the game with mobile portrait + touch emulation, dispatches synthetic finger
+# gestures, and reads the page-side logs to verify the "finger -> player input" path.
+# Also measures the in-play layout (HUD hidden, track flush to the bottom).
 #
-# 用法：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\debug\touch-link.ps1 -Port 9222 -Url 'http://localhost:8000/?debug=touch'
+# Usage:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\debug\touch-link.ps1 `
+#     -Port 9222 -Url 'http://localhost:8000/?debug=touch'
 
 param(
   [int]$Port = 9222,
@@ -104,21 +106,23 @@ Send-Cdp -Method 'Page.navigate' -Params $p | Out-Null
 
 Start-Sleep -Seconds 3
 
-$metrics = Eval-Js -Expression @'
-(function(){
-  var cv=document.getElementById('gameCanvas');
-  if(!cv) return JSON.stringify({error:'no canvas'});
-  var r=cv.getBoundingClientRect();
-  return JSON.stringify({
-    viewport: window.innerWidth+'x'+window.innerHeight,
-    gameState: cv.dataset.gameState,
-    layout: cv.dataset.layout,
-    display: cv.dataset.displayWidth+'x'+cv.dataset.displayHeight,
-    internal: cv.width+'x'+cv.height,
-    rect: Math.round(r.left)+','+Math.round(r.top)+' '+Math.round(r.width)+'x'+Math.round(r.height)
-  });
-})()
-'@
+$metrics = Eval-Js -Expression "(function(){var cv=document.getElementById('gameCanvas');if(!cv)return JSON.stringify({error:'no canvas'});var r=cv.getBoundingClientRect();return JSON.stringify({viewport:window.innerWidth+'x'+window.innerHeight,gameState:cv.dataset.gameState,layout:cv.dataset.layout,display:cv.dataset.displayWidth+'x'+cv.dataset.displayHeight,internal:cv.width+'x'+cv.height,rect:Math.round(r.left)+','+Math.round(r.top)+' '+Math.round(r.width)+'x'+Math.round(r.height)});})()"
+
+# Enter the in-play UI state (hide HUD, track fills and sits at the bottom).
+# Real flow calls ViewportManager.refreshLayout(); emulate the relayout by
+# re-applying the device metrics, which triggers the same observer path.
+$null = Eval-Js -Expression "(function(){var w=document.querySelector('.game-wrapper');w.dataset.playing='true';document.body.dataset.playing='true';return 'applied';})()"
+
+$p = @{}
+$p['width'] = $Width; $p['height'] = ($Height - 1); $p['deviceScaleFactor'] = 3; $p['mobile'] = $true
+$p['screenWidth'] = $Width; $p['screenHeight'] = $Height
+Send-Cdp -Method 'Emulation.setDeviceMetricsOverride' -Params $p | Out-Null
+Start-Sleep -Milliseconds 300
+$p['height'] = $Height
+Send-Cdp -Method 'Emulation.setDeviceMetricsOverride' -Params $p | Out-Null
+Start-Sleep -Milliseconds 600
+
+$playLayout = Eval-Js -Expression "(function(){var cv=document.getElementById('gameCanvas');var hd=document.querySelector('.game-header');var ft=document.querySelector('.game-footer');var bar=document.getElementById('statusBar');var r=cv.getBoundingClientRect();function vis(el){return el?getComputedStyle(el).display:'-'}return JSON.stringify({viewport:window.innerWidth+'x'+window.innerHeight,canvas:Math.round(r.left)+','+Math.round(r.top)+' '+Math.round(r.width)+'x'+Math.round(r.height),canvasFillRatio:+(r.width/window.innerWidth).toFixed(3),canvasBottomGap:Math.round(window.innerHeight-r.bottom),headerDisplay:vis(hd),statusBarDisplay:vis(bar),footerDisplay:vis(ft),display:cv.dataset.displayWidth+'x'+cv.dataset.displayHeight,layout:cv.dataset.layout});})()"
 
 $rect = (Eval-Js -Expression "(function(){var r=document.getElementById('gameCanvas').getBoundingClientRect();return JSON.stringify({l:r.left,t:r.top,w:r.width,h:r.height});})()") | ConvertFrom-Json
 
@@ -127,8 +131,8 @@ $sx = $rect.l + $rect.w * 0.25
 $mx = $rect.l + $rect.w * 0.50
 $ex = $rect.l + $rect.w * 0.75
 
-# --- 1) 右滑（作为首个动作，避免状态污染） ---
-Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];' | Out-Null
+# 1) swipe right (first action, to avoid state pollution)
+$null = Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];'
 Send-Touch -Type 'touchStart' -X $sx -Y $cy
 Start-Sleep -Milliseconds 60
 Send-Touch -Type 'touchMove' -X $mx -Y $cy
@@ -137,10 +141,10 @@ Send-Touch -Type 'touchMove' -X $ex -Y $cy
 Start-Sleep -Milliseconds 60
 Send-Touch -Type 'touchEnd' -X $ex -Y $cy
 Start-Sleep -Milliseconds 350
-$swipeLog = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:window.__INPUT_LOG__})'
+$swipeRight1 = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:window.__INPUT_LOG__})'
 
-# --- 1b) 再来一次右滑（同样手势重复，用于判断是否首次失效） ---
-Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];' | Out-Null
+# 2) swipe right again (same gesture, repeat)
+$null = Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];'
 Send-Touch -Type 'touchStart' -X $sx -Y $cy
 Start-Sleep -Milliseconds 60
 Send-Touch -Type 'touchMove' -X $mx -Y $cy
@@ -151,24 +155,24 @@ Send-Touch -Type 'touchEnd' -X $ex -Y $cy
 Start-Sleep -Milliseconds 350
 $swipeRight2 = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:window.__INPUT_LOG__})'
 
-# --- 2) 左滑 ---
-Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];' | Out-Null
+# 3) swipe left
+$null = Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];'
 Send-Touch -Type 'touchStart' -X $ex -Y $cy
 Start-Sleep -Milliseconds 60
 Send-Touch -Type 'touchMove' -X $sx -Y $cy
 Start-Sleep -Milliseconds 60
 Send-Touch -Type 'touchEnd' -X $sx -Y $cy
 Start-Sleep -Milliseconds 350
-$swipeLeftLog = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:window.__INPUT_LOG__})'
+$swipeLeft = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:window.__INPUT_LOG__})'
 
-# --- 3) 左侧轻触（tap 兜底） ---
-Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];' | Out-Null
+# 4) tap left zone (tap fallback)
+$null = Eval-Js -Expression 'window.__INPUT_LOG__=[]; window.__TOUCH_LOG__=[];'
 $tapX = $rect.l + $rect.w * 0.12
 Send-Touch -Type 'touchStart' -X $tapX -Y $cy
 Start-Sleep -Milliseconds 40
 Send-Touch -Type 'touchEnd' -X $tapX -Y $cy
 Start-Sleep -Milliseconds 350
-$tapLog = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:window.__INPUT_LOG__})'
+$tapLeft = Eval-Js -Expression 'JSON.stringify({touch:window.__TOUCH_LOG__, input:window.__INPUT_LOG__})'
 
 if ($Out -ne '') {
   try {
@@ -181,9 +185,10 @@ if ($Out -ne '') {
 }
 
 Write-Output ('METRICS=' + $metrics)
-Write-Output ('SWIPE_RIGHT_1ST=' + $swipeLog)
+Write-Output ('PLAY_LAYOUT=' + $playLayout)
+Write-Output ('SWIPE_RIGHT_1ST=' + $swipeRight1)
 Write-Output ('SWIPE_RIGHT_2ND=' + $swipeRight2)
-Write-Output ('SWIPE_LEFT=' + $swipeLeftLog)
-Write-Output ('TAP_LEFT=' + $tapLog)
+Write-Output ('SWIPE_LEFT=' + $swipeLeft)
+Write-Output ('TAP_LEFT=' + $tapLeft)
 
 $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, 'done', [Threading.CancellationToken]::None).Wait()
