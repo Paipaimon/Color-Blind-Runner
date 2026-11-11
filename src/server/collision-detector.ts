@@ -22,6 +22,11 @@ export interface Player {
   alive: boolean;
   distance: number;
   ready: boolean;
+  lives?: number;
+  shield?: boolean;
+  invulnerableUntil?: number;
+  survivalTime?: number;
+  totalMoves?: number;
 }
 
 /**

@@ -127,6 +127,7 @@ export declare class CanvasRenderer {
     /**
      * 绘制单个障碍物（圆角 + 内高光 + 微弱投影）
      */
+    private renderPowerUps;
     private drawObstacle;
     /**
      * 渲染距离

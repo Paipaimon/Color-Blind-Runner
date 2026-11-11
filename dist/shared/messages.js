@@ -16,6 +16,7 @@ export var ServerMessageType;
 (function (ServerMessageType) {
     ServerMessageType["ROOM_JOINED"] = "ROOM_JOINED";
     ServerMessageType["ROOM_LEFT"] = "ROOM_LEFT";
+    ServerMessageType["ROOM_STATE"] = "ROOM_STATE";
     ServerMessageType["PLAYER_JOINED"] = "PLAYER_JOINED";
     ServerMessageType["PLAYER_LEFT"] = "PLAYER_LEFT";
     ServerMessageType["GAME_STATE"] = "GAME_STATE";
@@ -32,10 +33,30 @@ export var ServerMessageType;
 export function parseClientMessage(data) {
     try {
         const parsed = JSON.parse(data);
-        if (typeof parsed === 'object' && parsed !== null && 'type' in parsed) {
-            return parsed;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            return null;
+        switch (parsed.type) {
+            case ClientMessageType.JOIN_ROOM:
+                if (parsed.roomId !== undefined && (typeof parsed.roomId !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(parsed.roomId)))
+                    return null;
+                if (parsed.playerName !== undefined && (typeof parsed.playerName !== 'string' || parsed.playerName.length > 40))
+                    return null;
+                return { type: parsed.type, roomId: parsed.roomId, playerName: parsed.playerName };
+            case ClientMessageType.LEAVE_ROOM:
+            case ClientMessageType.READY:
+                return { type: parsed.type };
+            case ClientMessageType.PING:
+                return typeof parsed.timestamp === 'number' && Number.isFinite(parsed.timestamp)
+                    ? { type: parsed.type, timestamp: parsed.timestamp } : null;
+            case ClientMessageType.PLAYER_INPUT: {
+                const input = parsed.input;
+                if (!input || ['up', 'down', 'left', 'right'].some(key => typeof input[key] !== 'boolean'))
+                    return null;
+                return { type: parsed.type, input: { up: input.up, down: input.down, left: input.left, right: input.right } };
+            }
+            default:
+                return null;
         }
-        return null;
     }
     catch {
         return null;

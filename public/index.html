@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0c11">
   <!-- 站点图标：内联 SVG，四条竖向色带（与移动端竖屏赛道的方向一致） -->
@@ -834,6 +834,60 @@
       .action-hint { display: none; }
       .game-wrapper { gap: 6px; }
     }
+
+    [hidden] { display: none !important; }
+    .session-hud {
+      position: absolute;
+      top: max(12px, env(safe-area-inset-top));
+      left: max(12px, env(safe-area-inset-left));
+      right: max(12px, env(safe-area-inset-right));
+      z-index: 5;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      pointer-events: none;
+      color: #e9f0fa;
+      font-size: 13px;
+    }
+    .session-hud > span { padding: 7px 12px; border-radius: 12px; background: #101725ed; }
+    #lives { color: #ff839e; font-size: 24px; letter-spacing: 5px; }
+    .mobile-controls { display: none; }
+    .rules { color: var(--c-text-2); font-size: 12px; text-align: center; max-width: 640px; }
+    #roundResult { color: #e6f6c6; text-align: center; }
+    .game-wrapper[data-playing="true"] .rules { display: none; }
+    @media (pointer: coarse), (max-width: 600px) {
+      .mobile-controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        width: 100%;
+        flex: 0 0 auto;
+        padding: 8px max(14px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+        background: #0a0d13;
+      }
+      .mobile-controls button {
+        min-height: 52px;
+        border: 1px solid #465268;
+        border-radius: 14px;
+        background: #182234;
+        color: #eef4ff;
+        font: inherit;
+        font-size: 20px;
+        touch-action: manipulation;
+      }
+      .mobile-controls button:active { background: #354968; }
+      .game-wrapper[data-playing="true"] { padding: 0; gap: 0; }
+      .game-wrapper[data-playing="true"] .game-header,
+      .game-wrapper[data-playing="true"] #statusBar,
+      .game-wrapper[data-playing="true"] .game-footer { display: none; }
+      .rules { margin: 0; font-size: 11px; }
+    }
+    @media (max-height: 460px) {
+      .rules { display: none; }
+      .mobile-controls button { min-height: 44px; }
+      #lives { font-size: 18px; }
+    }
   </style>
 </head>
 <body>
@@ -860,10 +914,21 @@
 
     <!-- 游戏舞台 -->
     <div class="game-stage">
+      <div class="session-hud" id="sessionHud" hidden>
+        <span id="lives" role="status" aria-live="polite" aria-label="剩余 3 条生命">♥♥♥</span>
+        <span id="liveDistance">0.0m</span>
+        <span id="activeEffect">同色障碍不可见</span>
+      </div>
       <canvas id="gameCanvas" width="1280" height="720" aria-label="游戏画面"></canvas>
       <div class="touch-feedback-layer" id="touchFeedbackLayer" aria-hidden="true"></div>
     </div>
 
+    <div class="mobile-controls" id="mobileControls" hidden aria-label="切换车道">
+      <button id="move-left" type="button" aria-label="向左切换车道">← 左移</button>
+      <button id="move-right" type="button" aria-label="向右切换车道">右移 →</button>
+    </div>
+    <div id="roundResult" role="status" hidden></div>
+    <p class="rules">每局 3 条生命 · 同色障碍不可见，碰撞扣 1 条生命<br>＋ 回复生命 · ◇ 获得护盾 · 滑动或按左右键换道，与队友互相提醒</p>
     <!-- 底部操作区 -->
     <footer class="game-footer">
       <button type="button" class="action-btn" id="actionBtn" disabled>连接中…</button>

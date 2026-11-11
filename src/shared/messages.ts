@@ -17,6 +17,7 @@ export enum ClientMessageType {
 export enum ServerMessageType {
   ROOM_JOINED = 'ROOM_JOINED',
   ROOM_LEFT = 'ROOM_LEFT',
+  ROOM_STATE = 'ROOM_STATE',
   PLAYER_JOINED = 'PLAYER_JOINED',
   PLAYER_LEFT = 'PLAYER_LEFT',
   GAME_STATE = 'GAME_STATE',
@@ -134,6 +135,11 @@ export interface PongMessage {
   serverTime: number;
 }
 
+export interface RoomStateMessage {
+  type: ServerMessageType.ROOM_STATE;
+  state: VisibleState;
+}
+
 export type ServerMessage =
   | RoomJoinedMessage
   | RoomLeftMessage
@@ -145,7 +151,8 @@ export type ServerMessage =
   | GameOverMessage
   | PlayerDiedMessage
   | ErrorMessage
-  | PongMessage;
+  | PongMessage
+  | RoomStateMessage;
 
 /**
  * 消息解析工具函数
@@ -153,10 +160,26 @@ export type ServerMessage =
 export function parseClientMessage(data: string): ClientMessage | null {
   try {
     const parsed = JSON.parse(data);
-    if (typeof parsed === 'object' && parsed !== null && 'type' in parsed) {
-      return parsed as ClientMessage;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    switch (parsed.type) {
+      case ClientMessageType.JOIN_ROOM:
+        if (parsed.roomId !== undefined && (typeof parsed.roomId !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(parsed.roomId))) return null;
+        if (parsed.playerName !== undefined && (typeof parsed.playerName !== 'string' || parsed.playerName.length > 40)) return null;
+        return { type: parsed.type, roomId: parsed.roomId, playerName: parsed.playerName };
+      case ClientMessageType.LEAVE_ROOM:
+      case ClientMessageType.READY:
+        return { type: parsed.type };
+      case ClientMessageType.PING:
+        return typeof parsed.timestamp === 'number' && Number.isFinite(parsed.timestamp)
+          ? { type: parsed.type, timestamp: parsed.timestamp } : null;
+      case ClientMessageType.PLAYER_INPUT: {
+        const input = parsed.input;
+        if (!input || ['up', 'down', 'left', 'right'].some(key => typeof input[key] !== 'boolean')) return null;
+        return { type: parsed.type, input: { up: input.up, down: input.down, left: input.left, right: input.right } };
+      }
+      default:
+        return null;
     }
-    return null;
   } catch {
     return null;
   }

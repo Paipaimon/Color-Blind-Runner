@@ -702,15 +702,11 @@ export class StatusBarRenderer {
       this.gameStartTime = currentTime;
     }
 
-    // 计算存活时间（结束后冻结为最终值）
-    if (this.gameStartTime > 0 && state.gameState === GameState.PLAYING) {
-      this.gameStats.survivalTime = (currentTime - this.gameStartTime) / 1000;
-    }
-
-    // 查找当前玩家
     const player = state.players.find(p => p.id === playerId);
-    if (player && player.distance !== undefined) {
-      this.gameStats.distance = player.distance;
+    if (player) {
+      this.gameStats.distance = player.distance ?? this.gameStats.distance;
+      this.gameStats.survivalTime = player.survivalTime ?? this.gameStats.survivalTime;
+      this.gameStats.totalMoves = player.totalMoves ?? this.gameStats.totalMoves;
     }
 
     // 记录滚动速度峰值（内部统计，不直接展示）
@@ -818,7 +814,7 @@ export class StatusBarRenderer {
 
     const animate = () => {
       if (this.timeValue && this.gameStartTime > 0 && this.layout === 'playing') {
-        const elapsed = (Date.now() - this.gameStartTime) / 1000;
+        const elapsed = this.gameStats.survivalTime;
         this.setText(this.timeValue, this.formatTime(elapsed));
       }
       this.animationFrameId = requestAnimationFrame(animate);

@@ -3,7 +3,7 @@
  * - desktop: 桌面端 / 横屏，保持 16:9 横向宽幅布局
  * - mobile-portrait: 移动端竖屏，赛道占满左右，充分利用窄屏宽度
  */
-export type LayoutMode = 'desktop' | 'mobile-portrait';
+export type LayoutMode = 'desktop' | 'mobile-portrait' | 'mobile-landscape';
 
 /**
  * 动态布局参数（由画布渲染器根据显示比例计算）
@@ -43,6 +43,9 @@ export const GAME_CONFIG = {
   PLAYER_SIZE: 30,
   MIN_PLAYERS: 2,
   MAX_PLAYERS: 4,
+  MAX_LIVES: 3,
+  HIT_INVULNERABILITY: 1,
+  WORLD_SPEED: 3,
 
   // 滚动设置
   INITIAL_SCROLL_SPEED: 2,
@@ -55,7 +58,7 @@ export const GAME_CONFIG = {
   // 游戏流程
   COUNTDOWN_SECONDS: 3,
   TICK_RATE: 60,
-  STATE_BROADCAST_RATE: 30,
+  STATE_BROADCAST_RATE: 20,
 
   // 网络设置
   DEFAULT_PORT: 8000,
@@ -79,11 +82,17 @@ export const GAME_CONFIG = {
  */
 export function computeLayoutParams(
   displayWidth: number,
-  displayHeight: number
+  displayHeight: number,
+  compactLandscape = false
 ): LayoutParams {
   const ratio = displayWidth / displayHeight;
   const isMobilePortrait = ratio < 1;
 
+  if (!isMobilePortrait && compactLandscape) {
+    return { mode: 'mobile-landscape', gameWidth: 720,
+      gameHeight: Math.round(720 / ratio), cellSize: GAME_CONFIG.CELL_SIZE,
+      offsetX: (720 - GAME_CONFIG.GRID_COLS * GAME_CONFIG.CELL_SIZE) / 2, scale: 1 };
+  }
   if (!isMobilePortrait) {
     return {
       mode: 'desktop',

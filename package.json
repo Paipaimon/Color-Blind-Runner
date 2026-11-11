@@ -4,18 +4,21 @@
   "description": "多人协作生存游戏 - 颜色可见性规则",
   "type": "module",
   "scripts": {
-    "build": "tsc",
-    "build:node": "node ./node_modules/typescript/bin/tsc",
+    "build": "node scripts/build.mjs",
+    "build:node": "node scripts/build.mjs",
     "start:server": "node dist/server/index.js",
-    "dev:server": "tsx src/server/index.ts",
+    "dev:server": "node scripts/dev.mjs",
     "test": "vitest run",
     "test:node": "node ./node_modules/vitest/vitest.mjs run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@types/node": "^22.10.2",
     "@types/ws": "^8.5.13",
     "fast-check": "^3.23.2",

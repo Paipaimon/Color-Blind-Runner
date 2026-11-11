@@ -65,12 +65,9 @@ export declare class RoomManager {
      * Requirements: 1.4
      */
     startGame(roomId: string): boolean;
-    /**
-     * 标记玩家死亡
-     * @param roomId 房间ID
-     * @param playerId 玩家ID
-     * Requirements: 1.5
-     */
+    /** Commit the countdown only while everyone is still eligible. */
+    beginPlaying(roomId: string): boolean;
+    cancelCountdown(roomId: string): void;
     markPlayerDead(roomId: string, playerId: string): void;
     /**
      * 检查游戏是否应该结束（所有玩家都死亡）

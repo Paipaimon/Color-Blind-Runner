@@ -3,7 +3,7 @@
  * - desktop: 桌面端 / 横屏，保持 16:9 横向宽幅布局
  * - mobile-portrait: 移动端竖屏，赛道占满左右，充分利用窄屏宽度
  */
-export type LayoutMode = 'desktop' | 'mobile-portrait';
+export type LayoutMode = 'desktop' | 'mobile-portrait' | 'mobile-landscape';
 /**
  * 动态布局参数（由画布渲染器根据显示比例计算）
  *
@@ -34,13 +34,16 @@ export declare const GAME_CONFIG: {
     readonly PLAYER_SIZE: 30;
     readonly MIN_PLAYERS: 2;
     readonly MAX_PLAYERS: 4;
+    readonly MAX_LIVES: 3;
+    readonly HIT_INVULNERABILITY: 1;
+    readonly WORLD_SPEED: 3;
     readonly INITIAL_SCROLL_SPEED: 2;
     readonly MAX_SCROLL_SPEED: 10;
     readonly SCROLL_ACCELERATION: 0.001;
     readonly OBSTACLE_MIN_GAP: 2;
     readonly COUNTDOWN_SECONDS: 3;
     readonly TICK_RATE: 60;
-    readonly STATE_BROADCAST_RATE: 30;
+    readonly STATE_BROADCAST_RATE: 20;
     readonly DEFAULT_PORT: 8000;
     readonly HEARTBEAT_INTERVAL: 30000;
     readonly CONNECTION_TIMEOUT: 60000;
@@ -59,7 +62,7 @@ export declare const GAME_CONFIG: {
  * @param displayWidth  画布 CSS 显示宽度
  * @param displayHeight 画布 CSS 显示高度
  */
-export declare function computeLayoutParams(displayWidth: number, displayHeight: number): LayoutParams;
+export declare function computeLayoutParams(displayWidth: number, displayHeight: number, compactLandscape?: boolean): LayoutParams;
 /**
  * 游戏配置类型
  */

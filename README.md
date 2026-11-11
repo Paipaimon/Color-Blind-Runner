@@ -4,9 +4,18 @@
 
 Color Blind Runner 是一个基于「颜色盲区」规则的多人在线生存游戏。
 
-每一局中，每位玩家会被分配一种颜色（红 / 绿 / 蓝 / 黄）。**玩家看不到与自己同色的障碍物**——而撞上同色障碍物恰恰就是唯一的死亡方式。也就是说，致命障碍对玩家而言是「隐形」的，必须依靠其他玩家（他们能看到你的颜色）的提醒来躲避。
+每一局中，每位玩家会被分配一种颜色（红 / 绿 / 蓝 / 黄）。**玩家看不到与自己同色的障碍物**——撞上同色障碍物会消耗生命，生命耗尽后出局。也就是说，致命障碍对玩家而言是「隐形」的，必须依靠其他玩家（他们能看到你的颜色）的提醒来躲避。
 
 游戏为服务器权威（Server-authoritative）架构：所有规则判定在服务端完成，客户端只负责发送输入和渲染服务端投影后的可见数据。
+
+### 三条生命与道具
+
+- 每局初始 3 条生命，上限 3 条。同色障碍命中扣 1 条，生命归零后观战。
+- 受伤或护盾挡伤后有 1 秒保护期，同一障碍只结算一次伤害。
+- 圆形「＋」道具回复 1 条生命，圆形「◇」道具提供一次护盾，护盾不叠加。
+- 道具自动拾取，每名玩家都可独立拾取同一道具一次。死亡玩家无法拾取。
+- 基础规则延续三车道、同色障碍不可见、其他颜色障碍不造成伤害，最后一名幸存者产生时结算。
+- 手机支持左右滑动与底部左右按钮，生命值和护盾状态在对局中持续显示，适配横竖屏及安全区域。
 
 ### 核心玩法
 
@@ -86,11 +95,11 @@ blind-line-game/
 | 蓝色 (BLUE) | 蓝色 | 其他玩家颜色的全部障碍物 |
 | 黄色 (YELLOW) | 黄色 | 其他玩家颜色的全部障碍物 |
 
-过滤逻辑实现于 [visibility-filter.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/visibility-filter.ts)：`filterObstacles()` 直接排除与玩家自身颜色相同的障碍物。
+过滤逻辑实现于 [visibility-filter.ts](src/server/visibility-filter.ts)：`filterObstacles()` 直接排除与玩家自身颜色相同的障碍物。
 
 ### 碰撞与死亡
 
-只有同时满足以下三个条件才会死亡（见 [collision-detector.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/collision-detector.ts)）：
+只有同时满足以下三个条件才会受到伤害（见 [collision-detector.ts](src/server/collision-detector.ts)）：
 
 1. 障碍物颜色与玩家颜色**相同**（即玩家看不见的那个颜色）
 2. 障碍物与玩家位于**同一条路线**（列）
@@ -100,7 +109,7 @@ blind-line-game/
 
 ### 危险提示（Proximity Hint）
 
-当自己颜色的障碍物距离玩家 3 个网格行以内时，服务端会下发提示（含所在路线与强度 0~1）。客户端据此将游戏区域边框变红加粗，作为「看不见的威胁正在逼近」的唯一预警。实现见 [visibility-filter.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/visibility-filter.ts) 与 [canvas-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/canvas-renderer.ts)。
+当自己颜色的障碍物距离玩家 3 个网格行以内时，服务端会下发提示（含所在路线与强度 0~1）。客户端据此将游戏区域边框变红加粗，作为「看不见的威胁正在逼近」的唯一预警。实现见 [visibility-filter.ts](src/server/visibility-filter.ts) 与 [canvas-renderer.ts](src/client/canvas-renderer.ts)。
 
 ## 游戏功能特性
 
@@ -109,14 +118,14 @@ blind-line-game/
 - 支持 **2~4 人**同局（`MIN_PLAYERS = 2`，`MAX_PLAYERS = 4`）
 - 自动匹配未满房间，否则创建新房间；也可通过消息指定 `roomId` 加入
 - 颜色按加入顺序依次分配：**红 → 蓝 → 黄 → 绿**
-- 准备机制：所有玩家准备且人数达标后，进入 **3 秒倒计时**再开局
-- 游戏进行中掉线视为死亡，并广播 `PLAYER_DIED`（`killedBy: 'disconnect'`）
+- 准备机制：所有玩家准备且人数达标后，进入 **3 秒倒计时**再开局；倒计时中有人离开会取消倒计时并重置准备
+- 游戏进行中掉线视为出局，并广播 `PLAYER_DIED`（`killedBy: 'disconnect'`）
 
 ### 输入系统
 
-- **键盘**：[input-handler.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/input-handler.ts) 监听方向键与 WASD；服务端实际只消费左右方向（路线切换），上下键当前不产生位移
-- **触控**：[touch-handler.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/touch-handler.ts) 识别左右滑动手势（最小距离 30px、最长 300ms、50ms 防抖），垂直滑动默认关闭
-- **输入合并**：[input-merger.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/input-merger.ts) 对键盘与触控做逻辑或（OR）合并，仅在合并结果变化时才发送，避免重复消息
+- **键盘**：[input-handler.ts](src/client/input-handler.ts) 监听方向键与 WASD；服务端实际只消费左右方向（路线切换），上下键当前不产生位移
+- **触控**：[touch-handler.ts](src/client/touch-handler.ts) 识别左右滑动手势（最小距离 30px、最长 300ms、50ms 防抖），垂直滑动默认关闭
+- **输入合并**：[input-merger.ts](src/client/input-merger.ts) 对键盘与触控做逻辑或（OR）合并，仅在合并结果变化时才发送，避免重复消息
 - **准备 / 重开**：空格键 / 回车、点击底部操作按钮、点击画布或触摸画布
 
 ### 渲染系统
@@ -137,7 +146,7 @@ blind-line-game/
 
 | 手段 | 说明 |
 |------|------|
-| 广播间推帧 | 由相邻两次广播的位置差估算世界速度，在两个广播之间按显示刷新率（通常 60Hz）外推**取景位置**，每收到广播即与服务端权威位置对齐；外推值永不超过服务端最新位置 |
+| 广播间推帧 | 缓存服务端快照，按接收时间延迟 100ms 插值镜头位置，统一由 requestAnimationFrame 绘制 |
 | 静态画面不重绘 | 等待 / 倒计时 / 结束画面完全静态，不启动推帧循环；`requestAnimationFrame` 循环仅在 `PLAYING` 期间运行 |
 | 绘制开销 | 背景与遮罩渐变创建一次后缓存复用，避免每帧重建 `CanvasGradient` |
 | 过渡帧不做重复工作 | 推帧时不重复写入状态栏、按钮等 DOM，这些只在收到广播时更新一次 |
@@ -146,7 +155,7 @@ blind-line-game/
 
 ### 状态栏
 
-[status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) 以 DOM 形式渲染，按数据槽增量更新，并按阶段切换信息层级：
+[status-bar-renderer.ts](src/client/status-bar-renderer.ts) 以 DOM 形式渲染，按数据槽增量更新，并按阶段切换信息层级：
 
 | 阶段 | 呈现内容 |
 |------|---------|
@@ -162,17 +171,17 @@ blind-line-game/
 
 | 区域 | 承载内容 | 实现 |
 |------|---------|------|
-| 顶部品牌栏 | 四色标识 + 连接状态灯（连接中 / 已连接 / 连接已断开） | `public/index.html` + [index.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/index.ts) |
-| 状态栏 HUD | 大厅：在线人数、已准备人数、房间号、状态胶囊；对局中：游玩人数、距离、存活时间、自身颜色；结束：最终成绩与个人最佳对比 | [status-bar-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/status-bar-renderer.ts) |
-| 游戏舞台 | 1280×720 画布，按 16:9 自适应舞台 | [canvas-renderer.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/canvas-renderer.ts) |
-| 底部操作区 | 主操作按钮（准备 / 已准备 / 倒计时 / 游戏进行中 / 重新开始）+ 按键提示 | [index.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/index.ts) |
+| 顶部品牌栏 | 四色标识 + 连接状态灯（连接中 / 已连接 / 连接已断开） | `public/index.html` + [index.ts](src/client/index.ts) |
+| 状态栏 HUD | 大厅：在线人数、已准备人数、房间号、状态胶囊；对局中：游玩人数、距离、存活时间、自身颜色；结束：最终成绩与个人最佳对比 | [status-bar-renderer.ts](src/client/status-bar-renderer.ts) |
+| 游戏舞台 | 1280×720 画布，按 16:9 自适应舞台 | [canvas-renderer.ts](src/client/canvas-renderer.ts) |
+| 底部操作区 | 主操作按钮（准备 / 已准备 / 倒计时 / 游戏进行中 / 重新开始）+ 按键提示 | [index.ts](src/client/index.ts) |
 
-界面样张见 [docs/ui](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/docs/ui)：`lobby-desktop.png`、`lobby-mobile.png`、`hud-playing.png`、`state-playing.png`、`state-danger.png`、`state-dead.png`。
+界面样张见 [docs/ui](docs/ui)：`lobby-desktop.png`、`lobby-mobile.png`、`hud-playing.png`、`state-playing.png`、`state-danger.png`、`state-dead.png`。
 
 设计要点：
 
 - **只回答一个问题**：状态栏按阶段只呈现当下最关心的数字——大厅看"几个人、几个准备了"，对局看"几个人在玩、跑了多远、活了多久"，房间号在对局中自动让位
-- **人数来源**：在线/已准备人数由服务端广播（`ROOM_JOINED` / `PLAYER_JOINED` / `PLAYER_LEFT`）加本机准备动作在客户端聚合，仅用于展示，不参与任何判定
+- **人数来源**：在线/已准备人数由服务端 `ROOM_STATE` 广播同步，仅用于展示，不参与任何判定
 - **状态可读性**：状态栏不再每帧重建 DOM，改为构造时建立数据槽、渲染时增量写入文本与类名，避免样式抖动
 - **危险提示**：自己颜色的障碍物逼近时，车道边框转为警示色并随强度增强（唯一的危险反馈，不含方向引导）
 - **颜色即信息**：四种玩家颜色在 UI 与画布中一致，且不额外标注障碍物信息，避免削弱"颜色盲区"这一核心机制
@@ -188,7 +197,7 @@ blind-line-game/
 
 ### 移动端适配
 
-[viewport-manager.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/viewport-manager.ts) 负责：
+[viewport-manager.ts](src/client/viewport-manager.ts) 负责：
 
 - 动态写入 `viewport` meta（禁用缩放、`viewport-fit=cover`）
 - 按设备与状态切换画布尺寸策略：大厅/结算按竖版比例整体可见，对局中则铺满视口并贴底
@@ -207,7 +216,7 @@ blind-line-game/
 
 ## 关键配置
 
-来源：[constants.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/shared/constants.ts) 与 [game-loop.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/game-loop.ts)。
+来源：[constants.ts](src/shared/constants.ts) 与 [game-loop.ts](src/server/game-loop.ts)。
 
 | 配置项 | 值 | 说明 |
 |-------|-----|------|
@@ -230,7 +239,7 @@ blind-line-game/
 
 ### 环境要求
 
-- Node.js 18+
+- Node.js 22+
 - TypeScript 5.0+
 - 现代浏览器（需支持 WebSocket、Canvas、ES Module）
 
@@ -246,7 +255,7 @@ npm run build
 # 启动服务器（运行编译产物）
 npm run start:server
 
-# 开发模式启动（tsx 直接运行 TS 源码）
+# 开发模式启动（自动编译前后端，后端文件变化自动重启）
 npm run dev:server
 
 # 运行测试（vitest）
@@ -254,6 +263,11 @@ npm test
 
 # 监听模式测试
 npm run test:watch
+
+# 无头浏览器验证手机横竖屏、滑动、按钮、键盘与结算
+# Windows 默认使用已安装的 Edge，其他平台先运行 npx playwright install chromium
+npm run build
+npm run test:e2e
 ```
 
 ### 在 WSL 中调试
@@ -272,7 +286,7 @@ npm run test:node
 npm run start:server
 ```
 
-多客户端联调与触控核验脚本位于 [scripts/debug](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/scripts/debug)：
+多客户端联调与触控核验脚本位于 [scripts/debug](scripts/debug)：
 
 ```bash
 # 启动/重启本地服务器（自动写日志并打印 WSL IP；服务器监听 0.0.0.0:8000）
@@ -319,7 +333,7 @@ avg 0.102ms / median 0.100ms / p95 0.200ms / max 4ms（首帧建渐变）   60fp
 
 `npm run start:server` 后访问 `http://localhost:8000`，服务器会：
 
-- 对 `/` 与 `/index.html` 返回 [public/index.html](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/public/index.html)
+- 对 `/` 与 `/index.html` 返回 [public/index.html](public/index.html)
 - 对 `/dist/*` 返回编译后的客户端脚本
 - 同一端口提供 WebSocket 服务
 
@@ -370,10 +384,10 @@ wsl --shutdown      # 重启 WSL 后重新打开终端，并重新启动服务�
 
 使用 Vitest，当前测试覆盖两个核心模块：
 
-- [collision-detector.test.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/server/collision-detector.test.ts) - 同色同路线碰撞、异色不碰撞、异路线不碰撞、死亡玩家不参与判定、位置不重叠等 7 个用例
-- [input-merger.test.ts](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/src/client/input-merger.test.ts) - 键盘/触控输入处理、OR 合并、变化时才发送、状态重置与调试信息
+- [collision-detector.test.ts](src/server/collision-detector.test.ts) - 同色同路线碰撞、异色不碰撞、异路线不碰撞、死亡玩家不参与判定、位置不重叠等 7 个用例
+- [input-merger.test.ts](src/client/input-merger.test.ts) - 键盘/触控输入处理、OR 合并、变化时才发送、状态重置与调试信息
 
-此外根目录的 [verify-input-merger.js](file:///d:/Code%20Files/VibeCodingProjects/blind-line-game/verify-input-merger.js) 是一个可在 Node 中直接运行的输入合并逻辑验证脚本（自带简化的 Mock 实现）。
+此外根目录的 [verify-input-merger.js](verify-input-merger.js) 是一个可在 Node 中直接运行的输入合并逻辑验证脚本（自带简化的 Mock 实现）。
 
 ## 代码规范与架构原则
 
@@ -391,19 +405,13 @@ wsl --shutdown      # 重启 WSL 后重新打开终端，并重新启动服务�
 - **可复现性**：障碍物由种子随机数（Mulberry32）生成，随机参数集中管理
 - **模块分离**：共享协议、服务端逻辑、客户端渲染/输入/网络各自独立
 
-## 已知实现细节与遗留项
+## 服务端与验证
 
-以下为阅读源码时发现的、与文档/命名不完全一致之处，当前行为以代码为准：
+房间分别持有障碍生成器、道具生成器和计时器。主循环采用固定步长，生成范围限制在视野前方，结束时回收整局资源。静态文件仅开放 public、dist/client 和 dist/shared 的浏览器资产。客户端消息经过逐类型校验，并限制消息大小、发送频率与慢连接积压。
 
-- **阻塞性问题（未修复）**：房间开局后服务器会因 `ObstacleGenerator not initialized. Call init() first.` 崩溃（`game-loop.ts` 的 `tick()` → `obstacleGenerator.generateNext()`）。原因是 `GameLoop` 只持有单个 `ObstacleGenerator` 实例且按房间复用，而 `RoomManager.startGame()` 与 `GameLoop.start()` 各自维护一套房间状态，第二轮开局时生成器未针对该房间重新初始化。这属于服务端游戏逻辑缺陷，本次 UI 重构未改动相关代码，另行修复
-- `shared/types.ts` 中的 `COLOR_VISIBILITY` 常量（红/绿/蓝各可见 4 色）**未被任何逻辑使用**，实际规则是排除自身颜色
-- `ObstacleColor` 定义了 `CYAN` / `MAGENTA` / `WHITE` 混合色，但生成器只从玩家颜色中取色，因此混合色障碍物当前不会出现
-- `GAME_CONFIG.STATE_BROADCAST_RATE = 30` 与实际使用的 `GAME_LOOP_CONFIG.BROADCAST_RATE = 20` 不一致，后者才是生效值
-- `INITIAL_SCROLL_SPEED` / `MAX_SCROLL_SPEED` / `SCROLL_ACCELERATION` 未被主循环使用，滚动速度恒为 `WORLD_SPEED = 3`；广播中的 `scrollSpeed` 为固定值 `100`
-- `HEARTBEAT_INTERVAL` / `CONNECTION_TIMEOUT` 已定义，但客户端未启动心跳定时器
-- 存在两套并行的 `GameState` 枚举（`shared/types.ts` 与 `game-loop.ts`，以及 `visibility-filter.ts`），通过转换函数映射
-- `input-merger` 中累计的移动次数仅在游戏结束界面展示
-- `dist/` 中存在若干历史编译产物（如 `-viewport-manager.js`、`game-tips.js`、`integration-test.js`），源码已无对应文件，删除目录重新编译即可清理
+准备、生命、护盾、距离、存活时间与移动次数由服务端判定。最终结算携带完整统计数据，已出局玩家的时间和距离冻结。
+
+回归测试覆盖多房间隔离、长局障碍数量、三次受伤、护盾、回血、倒计时退出、房间清理、可见性和消息校验。GitHub Actions 在 Windows 和 Linux 上运行编译与测试，并在 Linux 上运行 Chromium 浏览器验证。
 
 ## 许可证
 

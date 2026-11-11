@@ -37,6 +37,12 @@ export interface Player {
     position: Position;
     isAlive: boolean;
     distance?: number;
+    lives?: number;
+    shield?: boolean;
+    invulnerableFor?: number;
+    survivalTime?: number;
+    totalMoves?: number;
+    ready?: boolean;
 }
 /**
  * 障碍物定义
@@ -87,6 +93,14 @@ export interface VisibleState {
     gameState: GameState;
     countdown?: number;
     proximityHints?: ProximityHint[];
+    powerUps?: VisiblePowerUp[];
+}
+export type PowerUpKind = 'heart' | 'shield';
+export interface VisiblePowerUp {
+    id: string;
+    kind: PowerUpKind;
+    route: number;
+    worldY: number;
 }
 /**
  * 颜色可见性映射

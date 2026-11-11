@@ -15,6 +15,9 @@ export const GAME_CONFIG = {
     PLAYER_SIZE: 30,
     MIN_PLAYERS: 2,
     MAX_PLAYERS: 4,
+    MAX_LIVES: 3,
+    HIT_INVULNERABILITY: 1,
+    WORLD_SPEED: 3,
     // 滚动设置
     INITIAL_SCROLL_SPEED: 2,
     MAX_SCROLL_SPEED: 10,
@@ -24,7 +27,7 @@ export const GAME_CONFIG = {
     // 游戏流程
     COUNTDOWN_SECONDS: 3,
     TICK_RATE: 60,
-    STATE_BROADCAST_RATE: 30,
+    STATE_BROADCAST_RATE: 20,
     // 网络设置
     DEFAULT_PORT: 8000,
     HEARTBEAT_INTERVAL: 30000,
@@ -44,9 +47,14 @@ export const GAME_CONFIG = {
  * @param displayWidth  画布 CSS 显示宽度
  * @param displayHeight 画布 CSS 显示高度
  */
-export function computeLayoutParams(displayWidth, displayHeight) {
+export function computeLayoutParams(displayWidth, displayHeight, compactLandscape = false) {
     const ratio = displayWidth / displayHeight;
     const isMobilePortrait = ratio < 1;
+    if (!isMobilePortrait && compactLandscape) {
+        return { mode: 'mobile-landscape', gameWidth: 720,
+            gameHeight: Math.round(720 / ratio), cellSize: GAME_CONFIG.CELL_SIZE,
+            offsetX: (720 - GAME_CONFIG.GRID_COLS * GAME_CONFIG.CELL_SIZE) / 2, scale: 1 };
+    }
     if (!isMobilePortrait) {
         return {
             mode: 'desktop',

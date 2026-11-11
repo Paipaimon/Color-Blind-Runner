@@ -18,6 +18,7 @@ export class ViewportManager {
     lastStageHeight = 0;
     /** 上一次写入的画布显示宽度 */
     lastCanvasWidth = 0;
+    lastCanvasHeight = 0;
     constructor(canvas, statusBar, gameWrapper) {
         this.canvas = canvas;
         this.statusBar = statusBar;
@@ -62,7 +63,6 @@ export class ViewportManager {
      */
     adjustForMobile() {
         // 禁用缩放
-        this.preventZoom();
         // 调整画布大小
         this.adjustCanvasSize();
         // 调整状态栏布局
@@ -76,8 +76,8 @@ export class ViewportManager {
      */
     detectDevice() {
         const userAgent = navigator.userAgent.toLowerCase();
-        const screenWidth = window.screen.width;
-        const screenHeight = window.screen.height;
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
         const pixelRatio = window.devicePixelRatio || 1;
         // 检测移动设备
         const isMobile = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent) ||
@@ -166,8 +166,13 @@ export class ViewportManager {
             targetWidth = Math.floor(Math.min(stageWidth - horizontalPadding, heightLimit * (16 / 9)));
             targetHeight = Math.floor(targetWidth * 9 / 16);
             layoutMode = 'desktop';
+            if (this.deviceInfo.isMobile || this.deviceInfo.isTablet) {
+                layoutMode = 'mobile-landscape';
+                targetWidth = Math.floor(stageWidth);
+                targetHeight = Math.floor(stageHeight);
+            }
         }
-        if (targetWidth >= 320 && (targetWidth !== this.lastCanvasWidth ||
+        if (targetWidth >= 320 && (targetWidth !== this.lastCanvasWidth || targetHeight !== this.lastCanvasHeight ||
             this.canvas.dataset.layout !== layoutMode)) {
             // 对局中的移动端竖屏：允许画布超出舞台高度并被 .game-wrapper 裁掉，
             // 这样赛道铺满整屏宽度、玩家贴屏幕底部，不会在顶部留下黑边
@@ -183,6 +188,7 @@ export class ViewportManager {
                 ? targetHeight
                 : Math.min(targetHeight, Math.max(1, Math.floor(stageHeight)));
             this.lastCanvasWidth = targetWidth;
+            this.lastCanvasHeight = targetHeight;
             this.canvas.style.width = `${safeWidth}px`;
             this.canvas.style.height = `${safeHeight}px`;
             this.canvas.dataset.sizing = 'fixed';
@@ -296,9 +302,6 @@ export class ViewportManager {
         const content = [
             'width=device-width',
             'initial-scale=1.0',
-            'maximum-scale=1.0',
-            'minimum-scale=1.0',
-            'user-scalable=no',
             'viewport-fit=cover'
         ].join(', ');
         viewportMeta.content = content;

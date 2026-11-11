@@ -29,6 +29,7 @@ export declare class ViewportManager {
     private lastStageHeight;
     /** 上一次写入的画布显示宽度 */
     private lastCanvasWidth;
+    private lastCanvasHeight;
     constructor(canvas: HTMLCanvasElement, statusBar: HTMLElement, gameWrapper: HTMLElement);
     /**
      * 初始化视口管理器

@@ -21,7 +21,7 @@ export interface Obstacle {
 export declare class ObstacleGenerator {
     private random;
     private playerColors;
-    private lastObstacleY;
+    private nextObstacleY;
     private obstacleIdCounter;
     /**
      * 初始化生成器

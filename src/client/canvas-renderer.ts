@@ -141,7 +141,7 @@ export class CanvasRenderer {
     if (!this.canvas) return false;
     const dw = Number(this.canvas.dataset.displayWidth) || this.canvas.clientWidth || GAME_CONFIG.GAME_WIDTH;
     const dh = Number(this.canvas.dataset.displayHeight) || this.canvas.clientHeight || GAME_CONFIG.GAME_HEIGHT;
-    const next = computeLayoutParams(dw, dh);
+    const next = computeLayoutParams(dw, dh, this.canvas?.dataset.layout === 'mobile-landscape');
     const changed =
       next.mode !== this.layoutMode ||
       next.gameWidth !== this.width ||
@@ -239,8 +239,12 @@ export class CanvasRenderer {
       case GameState.PLAYING:
         this.renderGame(state, worldYOverride);
         break;
-      case GameState.GAME_OVER:
+      case GameState.GAME_OVER: {
+        const player = state.players.find(candidate => candidate.id === this.myPlayerId);
+        this.distance = player?.distance ?? this.distance;
+        if (this.finalState) this.finalState.distance = this.distance;
         this.renderGameOver();
+      }
         break;
     }
 
@@ -259,7 +263,7 @@ export class CanvasRenderer {
 
     const gameAreaWidth = GAME_CONFIG.GRID_COLS * this.cellSize;
     const gameAreaHeight = GAME_CONFIG.GRID_ROWS * this.cellSize;
-    const isMobilePortrait = this.layoutMode === 'mobile-portrait';
+    const isMobilePortrait = this.layoutMode !== 'desktop';
 
     // 游戏区域整体背景（渐变缓存复用）—— 用单位矩阵覆盖整个画布
     if (!this.cachedBackground) {
@@ -379,7 +383,7 @@ export class CanvasRenderer {
 
     const gameAreaWidth = GAME_CONFIG.GRID_COLS * this.cellSize;
     const logicalHeight = this.height / this.scale;
-    const isMobilePortrait = this.layoutMode === 'mobile-portrait';
+    const isMobilePortrait = this.layoutMode !== 'desktop';
     const x = 0;
     const drawWidth = gameAreaWidth;
     const radius = isMobilePortrait ? 0 : 14;
@@ -482,9 +486,10 @@ export class CanvasRenderer {
 
     // 再渲染障碍物（在路径上面）
     this.renderObstacles(worldY);
+    this.renderPowerUps(state, worldY);
 
     // 渲染距离
-    this.renderDistance();
+    if (this.layoutMode === 'desktop') this.renderDistance();
 
     // 如果死亡，显示死亡提示
     if (this.isDead) {
@@ -733,6 +738,29 @@ export class CanvasRenderer {
   /**
    * 绘制单个障碍物（圆角 + 内高光 + 微弱投影）
    */
+  private renderPowerUps(state: VisibleState, worldY: number): void {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    for (const pickup of state.powerUps ?? []) {
+      const y = this.height / this.scale - this.cellSize - (pickup.worldY - worldY) * this.cellSize;
+      const x = (pickup.route + 0.5) * this.cellSize;
+      ctx.save();
+      ctx.fillStyle = '#101e2c';
+      ctx.strokeStyle = pickup.kind === 'heart' ? '#ff7b9c' : '#8ce5ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y + this.cellSize / 2, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = 'bold 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pickup.kind === 'heart' ? '+' : '◇', x, y + this.cellSize / 2);
+      ctx.restore();
+    }
+  }
+
   private drawObstacle(x: number, screenY: number, color: string): void {
     if (!this.ctx) return;
 
@@ -774,7 +802,7 @@ export class CanvasRenderer {
     let valueSize: number;
     let align: CanvasTextAlign;
 
-    if (this.layoutMode === 'mobile-portrait') {
+    if (this.layoutMode !== 'desktop') {
       x = 10 / this.scale;
       labelY = 12 / this.scale;
       valueY = 28 / this.scale;

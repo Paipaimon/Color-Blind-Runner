@@ -15,6 +15,7 @@ export declare enum ClientMessageType {
 export declare enum ServerMessageType {
     ROOM_JOINED = "ROOM_JOINED",
     ROOM_LEFT = "ROOM_LEFT",
+    ROOM_STATE = "ROOM_STATE",
     PLAYER_JOINED = "PLAYER_JOINED",
     PLAYER_LEFT = "PLAYER_LEFT",
     GAME_STATE = "GAME_STATE",
@@ -104,7 +105,11 @@ export interface PongMessage {
     timestamp: number;
     serverTime: number;
 }
-export type ServerMessage = RoomJoinedMessage | RoomLeftMessage | PlayerJoinedMessage | PlayerLeftMessage | GameStateMessage | CountdownMessage | GameStartMessage | GameOverMessage | PlayerDiedMessage | ErrorMessage | PongMessage;
+export interface RoomStateMessage {
+    type: ServerMessageType.ROOM_STATE;
+    state: VisibleState;
+}
+export type ServerMessage = RoomJoinedMessage | RoomLeftMessage | PlayerJoinedMessage | PlayerLeftMessage | GameStateMessage | CountdownMessage | GameStartMessage | GameOverMessage | PlayerDiedMessage | ErrorMessage | PongMessage | RoomStateMessage;
 /**
  * 消息解析工具函数
  */

@@ -3,12 +3,9 @@
  * 集成 WebSocket 客户端、输入处理器和画布渲染器
  * Requirements: 客户端集成
  *
- * 本次 UI 重构说明：
- * - 游戏逻辑、网络协议、输入合并与渲染数据流保持不变，仅重做界面编排层。
- * - 新增 DOM 驱动的操作按钮（准备/重新开始）、连接状态指示与断线提示层，
- *   使状态呈现集中在语义清晰的原生控件上，替代过去"点击画布任意处"的隐式交互。
  */
 
+import { SessionHud } from './session-hud.js';
 import { WebSocketClient } from './websocket-client.js';
 import { InputHandler } from './input-handler.js';
 import { TouchHandler } from './touch-handler.js';
@@ -39,6 +36,8 @@ interface ActionSignature {
  * Requirements: 3.1, 3.2, 3.3, 3.4, 3.5 - 增强状态栏信息显示
  */
 class GameClient {
+  private sessionHud = new SessionHud();
+  private snapshots: { at: number; worldY: number }[] = [];
   private wsClient: WebSocketClient;
   private inputMerger: InputMerger;
   private inputHandler: InputHandler;
@@ -73,19 +72,9 @@ class GameClient {
   private onlinePlayerIds: Set<string> = new Set();
   private readyPlayerIds: Set<string> = new Set();
 
-  // 画面平滑推帧（仅视觉：以服务端广播为锚点做取景外推，不修改任何游戏数据）
+  // Render the camera between authoritative snapshots with a short interpolation delay.
   private canvasAnimationId: number | null = null;
-  /** 由相邻两次广播推算的世界速度（世界单位/秒） */
-  private worldSpeed: number = 0;
-  /** 镜头当前世界位置（视觉插值结果，始终不超过服务端权威位置） */
   private cameraWorldY: number | null = null;
-  /** 上一帧时间戳（performance.now） */
-  private lastFrameTime: number = 0;
-  /** 上一次广播的权威位置与时刻（用于估算世界速度） */
-  private prevServerWorldY: number | null = null;
-  private prevServerAt: number = 0;
-  /** 本机是否已死亡（死亡后停止推帧） */
-  private isDeadLocally: boolean = false;
 
   constructor() {
     // 获取服务器地址
@@ -117,26 +106,11 @@ class GameClient {
    * - 本地开发时可通过 ?server=localhost 指定本地服务器
    */
   private getServerUrl(): string {
-    const urlParams = new URLSearchParams(window.location.search);
-    const serverParam = urlParams.get('server');
-
+    const override = new URLSearchParams(window.location.search).get('server');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = serverParam || window.location.hostname || 'localhost';
+    const host = override || window.location.host || 'localhost:8000';
+    return protocol + '//' + host;
 
-    // 如果是通过反向代理访问（HTTPS），不需要指定端口
-    // 如果是本地开发（HTTP），需要指定端口
-    let url: string;
-    if (window.location.protocol === 'https:') {
-      // 生产环境：通过反向代理，不需要端口
-      url = `${protocol}//${host}`;
-    } else {
-      // 开发环境：直接连接到 Node.js 服务器
-      const port = GAME_CONFIG.DEFAULT_PORT;
-      url = `${protocol}//${host}:${port}`;
-    }
-
-    console.log('[WebSocket] 连接地址:', url);
-    return url;
   }
 
   /**
@@ -181,13 +155,6 @@ class GameClient {
     // Requirements: 3.1, 3.2, 3.3, 3.4, 3.5 - 初始化增强状态栏渲染器
     this.statusBarRenderer = new StatusBarRenderer(statusBar);
 
-    // 设置移动次数统计回调
-    this.inputMerger.setMoveCallback(() => {
-      if (this.statusBarRenderer) {
-        this.statusBarRenderer.incrementMoveCount();
-      }
-    });
-
     // 初始化渲染器
     this.renderer.init(canvas);
 
@@ -196,8 +163,17 @@ class GameClient {
     const feedbackLayer = document.getElementById('touchFeedbackLayer');
     this.touchHandler = new TouchHandler(canvas, this.inputMerger, feedbackLayer);
 
+    for (const direction of ['left', 'right'] as const) {
+      document.getElementById('move-' + direction)?.addEventListener('click', () => {
+        if (this.currentState?.gameState !== GameState.PLAYING) return;
+        this.inputMerger.updateTouchInput({ up: false, down: false, left: direction === 'left', right: direction === 'right' });
+        this.inputMerger.updateTouchInput({ up: false, down: false, left: false, right: false });
+      });
+    }
+
     // 键盘：空格 / 回车 等同于点击操作按钮
     window.addEventListener('keydown', (e) => {
+      if ((e.target as HTMLElement)?.closest('button, input, textarea')) return;
       if (e.code === 'Space' || e.code === 'Enter' || e.key === 'Enter') {
         e.preventDefault();
         this.handleReadyAction();
@@ -224,7 +200,6 @@ class GameClient {
 
     // 触屏点击画布：仅在非进行中状态下触发操作，避免与滑动操作冲突
     canvas.addEventListener('touchend', () => {
-      this.requestMobileFullscreen();
       if (!this.currentState) return;
       if (this.currentState.gameState === GameState.WAITING ||
           this.currentState.gameState === GameState.GAME_OVER) {
@@ -736,6 +711,13 @@ class GameClient {
         case ServerMessageType.PLAYER_LEFT:
           this.handlePlayerLeft(message);
           break;
+        case ServerMessageType.ROOM_STATE:
+          this.onlinePlayerIds = new Set(message.state.players.map(player => player.id));
+          this.readyPlayerIds = new Set(message.state.players.filter(player => player.ready).map(player => player.id));
+          this.isReady = this.readyPlayerIds.has(this.myPlayerId ?? '');
+          this.statusBarRenderer?.updateRoster(this.onlinePlayerIds, this.readyPlayerIds);
+          this.handleGameState(message);
+          break;
         case ServerMessageType.GAME_STATE:
           this.handleGameState(message);
           break;
@@ -775,9 +757,7 @@ class GameClient {
     // 重置画面推帧状态（新一局从服务端锚点重新开始）
     this.stopCanvasAnimation();
     this.cameraWorldY = null;
-    this.worldSpeed = 0;
-    this.prevServerWorldY = null;
-    this.isDeadLocally = false;
+    this.snapshots = [];
 
     // 重置渲染器并设置玩家信息
     this.renderer.resetAll();
@@ -797,6 +777,8 @@ class GameClient {
       this.statusBarRenderer.render(this.currentState, this.myPlayerId, message.roomId, message.playerColor);
     }
 
+    this.renderer.render(this.currentState);
+    this.sessionHud.render(this.currentState, message.playerId);
     this.refreshActionButton();
 
     // 状态栏内容首次填充后舞台高度会变化，需要立即重新计算画布尺寸，
@@ -854,31 +836,15 @@ class GameClient {
    */
   private handleGameState(message: { state: VisibleState }): void {
     this.currentState = message.state;
-    // Requirements: 8.4 - 直接渲染接收到的状态，不做修改
-    this.renderer.render(message.state);
-
-    // 用相邻两次广播的位置差估算世界速度，供广播之间平滑推帧
-    const me = message.state.players.find(p => p.id === this.myPlayerId);
-    const now = performance.now();
-
-    if (me) {
-      if (this.prevServerWorldY !== null) {
-        const elapsed = (now - this.prevServerAt) / 1000;
-        const moved = me.position.y - this.prevServerWorldY;
-        if (elapsed > 0.001 && moved >= 0) {
-          this.worldSpeed = moved / elapsed;
-        }
-      }
-      this.prevServerWorldY = me.position.y;
-      this.prevServerAt = now;
-
-      if (this.cameraWorldY === null) {
-        this.cameraWorldY = me.position.y;
-      }
-      if (!me.isAlive) {
-        this.isDeadLocally = true;
-      }
+    const me = message.state.players.find(player => player.id === this.myPlayerId);
+    if (message.state.gameState === GameState.PLAYING && me) {
+      this.snapshots.push({ at: performance.now(), worldY: me.position.y });
+      if (this.snapshots.length > 12) this.snapshots.shift();
+      this.startCanvasAnimation();
+    } else {
+      this.renderer.render(message.state);
     }
+    if (this.myPlayerId) this.sessionHud.render(message.state, this.myPlayerId);
 
     // Requirements: 3.1 - 使用新的状态栏渲染器更新游戏信息
     if (this.statusBarRenderer && this.myPlayerId) {
@@ -922,10 +888,8 @@ class GameClient {
     this.touchHandler.bind();
 
     this.isReady = false;
-    this.isDeadLocally = false;
     this.cameraWorldY = null;
-    this.worldSpeed = 0;
-    this.prevServerWorldY = null;
+    this.snapshots = [];
 
     // Requirements: 3.5 - 启动状态栏动画（仅刷新时间数值）
     if (this.statusBarRenderer) {
@@ -962,6 +926,7 @@ class GameClient {
     this.isReady = false;
     this.currentState = message.finalState;
     this.renderer.render(message.finalState);
+    if (this.myPlayerId) this.sessionHud.render(message.finalState, this.myPlayerId, message.winners);
 
     // Requirements: 3.2, 3.3 - 显示游戏结束信息和最佳成绩对比
     if (this.statusBarRenderer && this.myPlayerId) {
@@ -1006,15 +971,6 @@ class GameClient {
     if (this.currentState.gameState === GameState.WAITING && !this.isReady) {
       this.wsClient.sendReady();
       this.isReady = true;
-      // 记录本机准备状态，供状态栏统计已准备人数
-      if (this.myPlayerId) {
-        this.readyPlayerIds.add(this.myPlayerId);
-      }
-      // Requirements: 3.1 - 更新准备状态显示
-      if (this.statusBarRenderer && this.myPlayerId) {
-        this.statusBarRenderer.updateRoster(this.onlinePlayerIds, this.readyPlayerIds);
-        this.statusBarRenderer.render(this.currentState, this.myPlayerId, this.roomId || undefined, this.myPlayerColor || undefined);
-      }
       this.refreshActionButton();
     } else if (this.currentState.gameState === GameState.GAME_OVER) {
       // 重置渲染器状态
@@ -1129,10 +1085,9 @@ class GameClient {
 
   /**
    * 启动画面推帧：在两个状态广播之间按显示刷新率补帧
-   * 只对"取景位置"做线性外推，不修改任何游戏数据，也不做任何碰撞或判定。
+   * 对快照之间的取景位置做线性插值，不修改任何游戏数据，也不做任何碰撞或判定。
    */
   private startCanvasAnimation(): void {
-    this.lastFrameTime = 0;
     if (this.canvasAnimationId !== null) return;
 
     const frame = () => {
@@ -1151,19 +1106,12 @@ class GameClient {
       cancelAnimationFrame(this.canvasAnimationId);
       this.canvasAnimationId = null;
     }
-    this.lastFrameTime = 0;
     if (this.currentState) {
       this.renderer.render(this.currentState);
     }
   }
 
-  /**
-   * 渲染平滑帧
-   *
-   * 思路：以服务端广播的位置为权威锚点，按相邻两次广播推算出的世界速度，
-   * 用真实帧间隔向前外推取景位置，因此画面以显示刷新率（通常 60Hz）推进，
-   * 而不是等服务端 20Hz 的广播逐跳移动。外推位置永不超过服务端最新位置。
-   */
+  /** Draw the round from the animation loop using delayed snapshot interpolation. */
   private renderInterpolatedFrame(): void {
     const state = this.currentState;
     if (!state) return;
@@ -1172,29 +1120,16 @@ class GameClient {
     const me = state.players.find(p => p.id === this.myPlayerId);
     if (!me) return;
 
-    const now = performance.now();
-    const deltaSeconds = this.lastFrameTime > 0 ? (now - this.lastFrameTime) / 1000 : 0;
-    this.lastFrameTime = now;
+    const renderAt = performance.now() - 100;
+    while (this.snapshots.length > 2 && this.snapshots[1].at <= renderAt) this.snapshots.shift();
+    const before = this.snapshots[0];
+    const after = this.snapshots[1] ?? before;
+    if (!before || !after) return;
+    const alpha = after.at === before.at ? 1 : Math.max(0, Math.min(1, (renderAt - before.at) / (after.at - before.at)));
+    const interpolated = before.worldY + (after.worldY - before.worldY) * alpha;
+    this.cameraWorldY = me.isAlive ? Math.max(this.cameraWorldY ?? 0, interpolated) : me.position.y;
+    this.renderer.render(state, this.cameraWorldY);
 
-    // 死亡后不再推进，固定在自己死亡时的位置
-    if (!me.isAlive || this.isDeadLocally) {
-      this.isDeadLocally = true;
-      this.cameraWorldY = me.position.y;
-      this.renderer.render(state, me.position.y);
-      return;
-    }
-
-    // 以服务端锚点校准：每收到一次广播就把镜头拉回权威位置
-    if (this.cameraWorldY === null) {
-      this.cameraWorldY = me.position.y;
-    }
-
-    // 每帧最多推进一个"广播周期应有的位移"，避免切后台回来后的跳变
-    const maxStep = this.worldSpeed * Math.min(deltaSeconds, 0.25);
-    const next = Math.min(this.cameraWorldY + maxStep, me.position.y);
-    this.cameraWorldY = next;
-
-    this.renderer.render(state, next);
   }
 
   /**

@@ -35,7 +35,7 @@ const OBSTACLE_CONFIG = {
 export class ObstacleGenerator {
   private random: SeededRandom | null = null;
   private playerColors: PlayerColor[] = [];
-  private lastObstacleY: number = 0;
+  private nextObstacleY: number = GAME_CONFIG.GRID_ROWS + 2;
   private obstacleIdCounter: number = 0;
 
   /**
@@ -48,7 +48,7 @@ export class ObstacleGenerator {
   init(seed: number, playerColors: PlayerColor[]): void {
     this.random = new SeededRandom(seed);
     this.playerColors = [...playerColors]; // 复制数组避免外部修改
-    this.lastObstacleY = 0;
+    this.nextObstacleY = GAME_CONFIG.GRID_ROWS + 2;
     this.obstacleIdCounter = 0;
   }
 
@@ -63,24 +63,10 @@ export class ObstacleGenerator {
 
     const obstacles: Obstacle[] = [];
     
-    // 计算生成区域：在当前可见区域前方
-    // 障碍物Y值越大，在屏幕上越靠上（前方）
-    const visibleRows = GAME_CONFIG.GRID_ROWS;
-    const spawnStartY = Math.max(
-      this.lastObstacleY + OBSTACLE_CONFIG.MIN_GAP,
-      worldPosition + visibleRows + 2  // 在可见区域外生成
-    );
-    const spawnEndY = spawnStartY + OBSTACLE_CONFIG.SPAWN_DISTANCE;
-
-    let nextObstacleY = spawnStartY;
-
-    while (nextObstacleY < spawnEndY) {
-      const obstacle = this.generateSingleObstacle(nextObstacleY);
-      obstacles.push(obstacle);
-      
-      // 随机间隔（减少间隔增加难度）
-      nextObstacleY += OBSTACLE_CONFIG.MIN_GAP + this.random.nextInt(1, 2);
-      this.lastObstacleY = obstacle.y;
+    const horizon = worldPosition + GAME_CONFIG.GRID_ROWS + OBSTACLE_CONFIG.SPAWN_DISTANCE;
+    while (this.nextObstacleY <= horizon) {
+      obstacles.push(this.generateSingleObstacle(this.nextObstacleY));
+      this.nextObstacleY += OBSTACLE_CONFIG.MIN_GAP + this.random.nextInt(1, 2);
     }
 
     return obstacles;
@@ -113,7 +99,7 @@ export class ObstacleGenerator {
     if (this.random) {
       this.random.reset();
     }
-    this.lastObstacleY = 0;
+    this.nextObstacleY = GAME_CONFIG.GRID_ROWS + 2;
     this.obstacleIdCounter = 0;
   }
 

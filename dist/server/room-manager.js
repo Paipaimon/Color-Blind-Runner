@@ -104,7 +104,9 @@ export class RoomManager {
             id: finalPlayerId,
             color: assignedColor,
             position: getInitialPosition(assignedColor),
-            isAlive: true
+            isAlive: true,
+            lives: GAME_CONFIG.MAX_LIVES,
+            ready: false
         };
         // 添加到房间
         room.players.set(finalPlayerId, player);
@@ -128,17 +130,7 @@ export class RoomManager {
         if (!room) {
             return;
         }
-        // 如果游戏正在进行，标记玩家为死亡而不是移除
-        if (room.gameState === GameState.PLAYING) {
-            const player = room.players.get(playerId);
-            if (player) {
-                player.isAlive = false;
-            }
-        }
-        else {
-            // 游戏未开始，直接移除玩家
-            room.players.delete(playerId);
-        }
+        room.players.delete(playerId);
         // 清理准备状态
         const roomReadyStates = this.readyStates.get(roomId);
         if (roomReadyStates) {
@@ -146,8 +138,8 @@ export class RoomManager {
         }
         // 清理玩家房间映射
         this.playerRoomMap.delete(playerId);
-        // 如果房间为空且游戏未开始，删除房间
-        if (room.players.size === 0 && room.gameState === GameState.WAITING) {
+        // 最后一位连接离开后回收房间
+        if (room.players.size === 0) {
             this.rooms.delete(roomId);
             this.readyStates.delete(roomId);
         }
@@ -195,6 +187,7 @@ export class RoomManager {
         const roomReadyStates = this.readyStates.get(roomId);
         if (roomReadyStates) {
             roomReadyStates.set(playerId, ready);
+            room.players.get(playerId).ready = ready;
         }
     }
     /**
@@ -260,12 +253,23 @@ export class RoomManager {
         room.startTime = Date.now();
         return true;
     }
-    /**
-     * 标记玩家死亡
-     * @param roomId 房间ID
-     * @param playerId 玩家ID
-     * Requirements: 1.5
-     */
+    /** Commit the countdown only while everyone is still eligible. */
+    beginPlaying(roomId) {
+        const room = this.rooms.get(roomId);
+        if (!room || room.gameState !== GameState.COUNTDOWN || !this.areAllPlayersReady(roomId))
+            return false;
+        room.gameState = GameState.PLAYING;
+        return true;
+    }
+    cancelCountdown(roomId) {
+        const room = this.rooms.get(roomId);
+        if (!room || room.gameState !== GameState.COUNTDOWN)
+            return;
+        room.gameState = GameState.WAITING;
+        room.startTime = null;
+        for (const player of room.players.values())
+            this.setPlayerReady(roomId, player.id, false);
+    }
     markPlayerDead(roomId, playerId) {
         const room = this.rooms.get(roomId);
         if (!room) {
