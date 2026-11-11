@@ -8,6 +8,7 @@
  */
 import { VisibleState, PlayerColor } from '../shared/types.js';
 export declare class CanvasRenderer {
+    private teamWarning;
     private canvas;
     private ctx;
     private width;
@@ -127,6 +128,9 @@ export declare class CanvasRenderer {
     /**
      * 绘制单个障碍物（圆角 + 内高光 + 微弱投影）
      */
+    showTeamWarning(route: number, durationMs: number): void;
+    pickObstacle(clientX: number, clientY: number, state: VisibleState): string | null;
+    private renderTeamWarning;
     private renderPowerUps;
     private drawObstacle;
     /**

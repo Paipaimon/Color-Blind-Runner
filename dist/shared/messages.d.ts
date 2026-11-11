@@ -7,6 +7,7 @@ export declare enum ClientMessageType {
     LEAVE_ROOM = "LEAVE_ROOM",
     PLAYER_INPUT = "PLAYER_INPUT",
     READY = "READY",
+    WARN_OBSTACLE = "WARN_OBSTACLE",
     PING = "PING"
 }
 /**
@@ -24,6 +25,7 @@ export declare enum ServerMessageType {
     GAME_OVER = "GAME_OVER",
     PLAYER_DIED = "PLAYER_DIED",
     ERROR = "ERROR",
+    TEAM_WARNING = "TEAM_WARNING",
     PONG = "PONG"
 }
 /**
@@ -54,7 +56,19 @@ export interface PingMessage {
     type: ClientMessageType.PING;
     timestamp: number;
 }
-export type ClientMessage = JoinRoomMessage | LeaveRoomMessage | PlayerInputMessage | ReadyMessage | PingMessage;
+export interface WarnObstacleMessage {
+    type: ClientMessageType.WARN_OBSTACLE;
+    obstacleId: string;
+}
+export interface TeamWarning {
+    fromPlayerId: string;
+    toPlayerId: string;
+    fromColor: PlayerColor;
+    toColor: PlayerColor;
+    route: number;
+    durationMs: number;
+}
+export type ClientMessage = JoinRoomMessage | LeaveRoomMessage | PlayerInputMessage | ReadyMessage | PingMessage | WarnObstacleMessage;
 export interface RoomJoinedMessage {
     type: ServerMessageType.ROOM_JOINED;
     roomId: string;
@@ -109,7 +123,10 @@ export interface RoomStateMessage {
     type: ServerMessageType.ROOM_STATE;
     state: VisibleState;
 }
-export type ServerMessage = RoomJoinedMessage | RoomLeftMessage | PlayerJoinedMessage | PlayerLeftMessage | GameStateMessage | CountdownMessage | GameStartMessage | GameOverMessage | PlayerDiedMessage | ErrorMessage | PongMessage | RoomStateMessage;
+export type ServerMessage = RoomJoinedMessage | RoomLeftMessage | PlayerJoinedMessage | PlayerLeftMessage | GameStateMessage | CountdownMessage | GameStartMessage | GameOverMessage | PlayerDiedMessage | ErrorMessage | PongMessage | RoomStateMessage | {
+    type: ServerMessageType.TEAM_WARNING;
+    warning: TeamWarning;
+};
 /**
  * 消息解析工具函数
  */

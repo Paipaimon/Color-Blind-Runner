@@ -43,6 +43,11 @@ export interface Player {
     survivalTime?: number;
     totalMoves?: number;
     ready?: boolean;
+    warningsSent?: number;
+    lastDamage?: {
+        route: number;
+        distance: number;
+    };
 }
 /**
  * 障碍物定义
@@ -94,6 +99,9 @@ export interface VisibleState {
     countdown?: number;
     proximityHints?: ProximityHint[];
     powerUps?: VisiblePowerUp[];
+    phase?: 'warmup' | 'pressure' | 'sprint';
+    remainingSeconds?: number;
+    endReason?: 'last_survivor' | 'time_limit';
 }
 export type PowerUpKind = 'heart' | 'shield';
 export interface VisiblePowerUp {

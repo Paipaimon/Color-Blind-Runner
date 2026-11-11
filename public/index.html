@@ -888,6 +888,25 @@
       .mobile-controls button { min-height: 44px; }
       #lives { font-size: 18px; }
     }
+    .round-meta {
+      position: absolute; z-index: 5; top: max(66px, calc(env(safe-area-inset-top) + 54px));
+      left: 14px; right: 14px; display: flex; justify-content: space-between; gap: 8px;
+      color: #e0e8f5; font-size: 12px; pointer-events: none;
+    }
+    .round-meta span { background: #101725ed; padding: 5px 8px; border-radius: 8px; }
+    .team-warning {
+      position: absolute; z-index: 6; top: max(102px, calc(env(safe-area-inset-top) + 90px));
+      left: 50%; transform: translateX(-50%); padding: 8px 12px; border-radius: 10px;
+      background: #332919ee; color: #ffdb9b; white-space: nowrap; pointer-events: none;
+    }
+    #roundReview { margin: 0; max-width: 680px; padding: 0 12px; color: #b9c7dc; font-size: 13px; text-align: center; }
+    .secondary-btn { background: transparent; color: #b9c7dc; border: 1px solid #465268; border-radius: 10px; padding: 10px 14px; min-height: 44px; cursor: pointer; }
+    @media (max-width: 450px) { #activeEffect { font-size: 10px; } .session-hud { gap: 4px; } }
+    @media (max-height: 460px) { .round-meta { top: 52px; } .team-warning { top: 85px; } #roundReview { font-size: 11px; } }
+    .game-wrapper[data-phase="GAME_OVER"] .rules { display: none; }
+    @media (pointer: coarse), (max-width: 600px) {
+      .game-wrapper[data-phase="GAME_OVER"] .game-stage { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -919,6 +938,11 @@
         <span id="liveDistance">0.0m</span>
         <span id="activeEffect">同色障碍不可见</span>
       </div>
+      <div class="round-meta" id="roundMeta" hidden>
+        <span id="roundPhase">热身 · 剩余 90s</span>
+        <span id="roundGoal">目标 30m</span>
+      </div>
+      <div class="team-warning" id="teamWarning" role="status" aria-live="polite" hidden></div>
       <canvas id="gameCanvas" width="1280" height="720" aria-label="游戏画面"></canvas>
       <div class="touch-feedback-layer" id="touchFeedbackLayer" aria-hidden="true"></div>
     </div>
@@ -928,10 +952,12 @@
       <button id="move-right" type="button" aria-label="向右切换车道">右移 →</button>
     </div>
     <div id="roundResult" role="status" hidden></div>
-    <p class="rules">每局 3 条生命 · 同色障碍不可见，碰撞扣 1 条生命<br>＋ 回复生命 · ◇ 获得护盾 · 滑动或按左右键换道，与队友互相提醒</p>
+    <p id="roundReview" hidden></p>
+    <p class="rules">每局 3 条生命 · 同色障碍不可见，碰撞扣 1 条生命<br>＋ 回复生命 · ◇ 获得护盾 · 滑动或按左右键换道，点按可见障碍提醒队友 · 90 秒三阶段挑战</p>
     <!-- 底部操作区 -->
     <footer class="game-footer">
       <button type="button" class="action-btn" id="actionBtn" disabled>连接中…</button>
+      <button type="button" id="findNewRoom" class="secondary-btn" hidden>重新匹配</button>
       <div class="action-hint" id="actionHint"></div>
     </footer>
   </div>

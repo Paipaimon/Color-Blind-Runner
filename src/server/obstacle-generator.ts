@@ -1,3 +1,4 @@
+import { phaseAtDistance } from '../shared/round-rules.js';
 import { SeededRandom } from './seeded-random.js';
 import { PlayerColor } from '../shared/types.js';
 import { GAME_CONFIG } from '../shared/constants.js';
@@ -65,8 +66,16 @@ export class ObstacleGenerator {
     
     const horizon = worldPosition + GAME_CONFIG.GRID_ROWS + OBSTACLE_CONFIG.SPAWN_DISTANCE;
     while (this.nextObstacleY <= horizon) {
-      obstacles.push(this.generateSingleObstacle(this.nextObstacleY));
-      this.nextObstacleY += OBSTACLE_CONFIG.MIN_GAP + this.random.nextInt(1, 2);
+      const phase = phaseAtDistance(this.nextObstacleY);
+      const first = this.generateSingleObstacle(this.nextObstacleY);
+      obstacles.push(first);
+      if (this.random.next() < phase.doubleChance) {
+        const second = this.generateSingleObstacle(this.nextObstacleY);
+        second.route = (first.route + this.random.nextInt(1, 2)) % GAME_CONFIG.GRID_COLS;
+        second.color = first.color;
+        obstacles.push(second);
+      }
+      this.nextObstacleY += this.random.nextFloat(phase.minGap, phase.maxGap);
     }
 
     return obstacles;

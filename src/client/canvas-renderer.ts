@@ -62,6 +62,7 @@ interface CachedObstacle {
 }
 
 export class CanvasRenderer {
+  private teamWarning: { route: number; until: number } | null = null;
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private width: number = GAME_CONFIG.GAME_WIDTH;
@@ -183,6 +184,7 @@ export class CanvasRenderer {
   }
 
   resetAll(): void {
+    this.teamWarning = null;
     this.pathPoints = [];
     this.currentCol = 1;
     this.obstacleCache.clear();
@@ -487,6 +489,7 @@ export class CanvasRenderer {
     // 再渲染障碍物（在路径上面）
     this.renderObstacles(worldY);
     this.renderPowerUps(state, worldY);
+    this.renderTeamWarning();
 
     // 渲染距离
     if (this.layoutMode === 'desktop') this.renderDistance();
@@ -738,6 +741,33 @@ export class CanvasRenderer {
   /**
    * 绘制单个障碍物（圆角 + 内高光 + 微弱投影）
    */
+  showTeamWarning(route: number, durationMs: number): void {
+    this.teamWarning = { route, until: performance.now() + durationMs };
+  }
+
+  pickObstacle(clientX: number, clientY: number, state: VisibleState): string | null {
+    if (!this.canvas) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const x = ((clientX - rect.left) * this.width / rect.width - this.offsetX) / this.scale;
+    const y = (clientY - rect.top) * this.height / rect.height / this.scale;
+    const visibleIds = new Set(state.obstacles.map(obstacle => obstacle.id));
+    for (const obstacle of this.obstacleCache.values()) {
+      const left = obstacle.col * this.cellSize;
+      const top = this.height / this.scale - this.cellSize - (obstacle.worldY - this.scrollWorldY) * this.cellSize;
+      if (visibleIds.has(obstacle.id) && x >= left && x <= left + this.cellSize && y >= top && y <= top + this.cellSize) return obstacle.id;
+    }
+    return null;
+  }
+
+  private renderTeamWarning(): void {
+    if (!this.ctx || !this.teamWarning || performance.now() > this.teamWarning.until) return;
+    this.ctx.save();
+    this.ctx.strokeStyle = '#ffcd78';
+    this.ctx.lineWidth = 3 / this.scale;
+    this.ctx.strokeRect(this.teamWarning.route * this.cellSize + 2, 0, this.cellSize - 4, this.height / this.scale);
+    this.ctx.restore();
+  }
+
   private renderPowerUps(state: VisibleState, worldY: number): void {
     if (!this.ctx) return;
     const ctx = this.ctx;

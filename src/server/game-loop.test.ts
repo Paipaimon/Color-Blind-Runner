@@ -94,7 +94,7 @@ describe('round rules', () => {
       const position = step * 0.05;
       obstacles.push(...generator.generateNext(position));
       obstacles = obstacles.filter(o => o.y > position - 2);
-      expect(obstacles.length).toBeLessThanOrEqual(10);
+      expect(obstacles.length).toBeLessThanOrEqual(24);
     }
     const other = new ObstacleGenerator();
     other.init(123, [PlayerColor.RED, PlayerColor.BLUE]);
@@ -115,4 +115,54 @@ describe('round rules', () => {
     expect(loop.isRunning('a')).toBe(false);
     expect(loop.getRoom('a')).toBeNull();
   });
+});
+
+it('ramps difficulty and finishes at 90 seconds with bounded entities', () => {
+  const { room, loop, advance } = setup();
+  // Avoid damage to inspect the complete timed round independently of survival.
+  for (const player of room.players) player.invulnerableUntil = 100;
+  advance(15);
+  expect(room.worldPosition).toBeCloseTo(45, 3);
+  advance(30);
+  expect(room.worldPosition).toBeCloseTo(153, 3);
+  advance(45);
+  expect(room.worldPosition).toBeCloseTo(342, 3);
+  expect(room.gameState).toBe(GameState.ENDED);
+  expect(room.endReason).toBe('time_limit');
+  expect(room.players.every(player => player.alive)).toBe(true);
+  expect(room.obstacles.length).toBeLessThanOrEqual(24);
+  expect(loop.getRoom('a')).toBeNull();
+});
+
+it('validates teammate warnings and rejects hidden, stale, duplicate and rapid pings', () => {
+  const { room, loop, advance } = setup();
+  room.obstacles = [
+    { id: 'blue', color: PlayerColor.BLUE, route: 2, y: 4 },
+    { id: 'blue2', color: PlayerColor.BLUE, route: 0, y: 6 },
+    { id: 'red', color: PlayerColor.RED, route: 1, y: 5 },
+    { id: 'far', color: PlayerColor.BLUE, route: 1, y: 50 }
+  ];
+  expect(loop.warnObstacle('a', '0', 'red')).toBeNull();
+  expect(loop.warnObstacle('a', '0', 'far')).toBeNull();
+  expect(loop.warnObstacle('a', '0', 'missing')).toBeNull();
+  expect(loop.warnObstacle('a', '0', 'blue')).toMatchObject({ fromPlayerId: '0', toPlayerId: '1', route: 2 });
+  expect(loop.warnObstacle('a', '0', 'blue')).toBeNull();
+  expect(loop.warnObstacle('a', '0', 'blue2')).toBeNull();
+  advance(1.1);
+  expect(loop.warnObstacle('a', '0', 'blue2')).not.toBeNull();
+  expect(room.players[0].warningsSent).toBe(2);
+});
+
+it('keeps at least one route open in every generated obstacle wave', () => {
+  const generator = new ObstacleGenerator();
+  generator.init(824, [PlayerColor.RED, PlayerColor.BLUE]);
+  const obstacles = generator.generateNext(1000);
+  const waves = new Map<number, Set<number>>();
+  for (const obstacle of obstacles) {
+    const routes = waves.get(obstacle.y) ?? new Set<number>();
+    routes.add(obstacle.route);
+    waves.set(obstacle.y, routes);
+  }
+  expect([...waves.values()].some(routes => routes.size === 2)).toBe(true);
+  expect([...waves.values()].every(routes => routes.size <= 2)).toBe(true);
 });

@@ -46,6 +46,8 @@ export interface Player {
   survivalTime?: number;
   totalMoves?: number;
   ready?: boolean;
+  warningsSent?: number;
+  lastDamage?: { route: number; distance: number };
 }
 
 /**
@@ -102,6 +104,9 @@ export interface VisibleState {
   countdown?: number;
   proximityHints?: ProximityHint[];  // 近距离提示（自己颜色的障碍物接近时）
   powerUps?: VisiblePowerUp[];
+  phase?: 'warmup' | 'pressure' | 'sprint';
+  remainingSeconds?: number;
+  endReason?: 'last_survivor' | 'time_limit';
 }
 
 export type PowerUpKind = 'heart' | 'shield';

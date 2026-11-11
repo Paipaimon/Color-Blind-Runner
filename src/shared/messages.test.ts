@@ -14,3 +14,9 @@ describe('client message validation', () => {
     }
   });
 });
+
+it('checks obstacle warning identifiers at the protocol boundary', () => {
+  expect(parseClientMessage('{"type":"WARN_OBSTACLE","obstacleId":"obstacle_12"}')).not.toBeNull();
+  expect(parseClientMessage('{"type":"WARN_OBSTACLE"}')).toBeNull();
+  expect(parseClientMessage('{"type":"WARN_OBSTACLE","obstacleId":{}}')).toBeNull();
+});

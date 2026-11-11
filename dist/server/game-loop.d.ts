@@ -1,3 +1,4 @@
+import { TeamWarning } from '../shared/messages.js';
 import { PlayerColor } from '../shared/types.js';
 import { Obstacle } from './obstacle-generator.js';
 import { Player } from './collision-detector.js';
@@ -17,6 +18,7 @@ export interface GameRoom {
     seed: number;
     powerUps?: PowerUp[];
     elapsed?: number;
+    endReason?: 'last_survivor' | 'time_limit';
 }
 export interface PlayerScore {
     id: string;
@@ -40,6 +42,7 @@ export declare class GameLoop {
     stop(roomId: string): void;
     tick(roomId: string): void;
     private step;
+    warnObstacle(roomId: string, playerId: string, obstacleId: string): TeamWarning | null;
     disconnectPlayer(roomId: string, playerId: string): void;
     private endGame;
     getRoom(roomId: string): GameRoom | null;

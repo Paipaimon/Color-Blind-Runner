@@ -177,7 +177,7 @@ export class RoomManager {
             return;
         }
         // 只有在等待状态才能设置准备
-        if (room.gameState !== GameState.WAITING) {
+        if (room.gameState !== GameState.WAITING && room.gameState !== GameState.GAME_OVER) {
             return;
         }
         // 玩家必须在房间中
@@ -242,7 +242,7 @@ export class RoomManager {
             return false;
         }
         // 只有在等待状态且所有玩家准备好才能开始
-        if (room.gameState !== GameState.WAITING) {
+        if (room.gameState !== GameState.WAITING && room.gameState !== GameState.GAME_OVER) {
             return false;
         }
         if (!this.areAllPlayersReady(roomId)) {
@@ -305,6 +305,8 @@ export class RoomManager {
         const room = this.rooms.get(roomId);
         if (room) {
             room.gameState = GameState.GAME_OVER;
+            for (const player of room.players.values())
+                this.setPlayerReady(roomId, player.id, false);
         }
     }
     /**

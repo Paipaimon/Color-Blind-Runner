@@ -8,6 +8,7 @@ export enum ClientMessageType {
   LEAVE_ROOM = 'LEAVE_ROOM',
   PLAYER_INPUT = 'PLAYER_INPUT',
   READY = 'READY',
+  WARN_OBSTACLE = 'WARN_OBSTACLE',
   PING = 'PING'
 }
 
@@ -26,6 +27,7 @@ export enum ServerMessageType {
   GAME_OVER = 'GAME_OVER',
   PLAYER_DIED = 'PLAYER_DIED',
   ERROR = 'ERROR',
+  TEAM_WARNING = 'TEAM_WARNING',
   PONG = 'PONG'
 }
 
@@ -65,12 +67,27 @@ export interface PingMessage {
   timestamp: number;
 }
 
+export interface WarnObstacleMessage {
+  type: ClientMessageType.WARN_OBSTACLE;
+  obstacleId: string;
+}
+
+export interface TeamWarning {
+  fromPlayerId: string;
+  toPlayerId: string;
+  fromColor: PlayerColor;
+  toColor: PlayerColor;
+  route: number;
+  durationMs: number;
+}
+
 export type ClientMessage =
   | JoinRoomMessage
   | LeaveRoomMessage
   | PlayerInputMessage
   | ReadyMessage
-  | PingMessage;
+  | PingMessage
+  | WarnObstacleMessage;
 
 // ============ 服务端消息 ============
 
@@ -152,7 +169,8 @@ export type ServerMessage =
   | PlayerDiedMessage
   | ErrorMessage
   | PongMessage
-  | RoomStateMessage;
+  | RoomStateMessage
+  | { type: ServerMessageType.TEAM_WARNING; warning: TeamWarning };
 
 /**
  * 消息解析工具函数
@@ -169,6 +187,9 @@ export function parseClientMessage(data: string): ClientMessage | null {
       case ClientMessageType.LEAVE_ROOM:
       case ClientMessageType.READY:
         return { type: parsed.type };
+      case ClientMessageType.WARN_OBSTACLE:
+        return typeof parsed.obstacleId === 'string' && /^obstacle_[0-9]{1,10}$/.test(parsed.obstacleId)
+          ? { type: parsed.type, obstacleId: parsed.obstacleId } : null;
       case ClientMessageType.PING:
         return typeof parsed.timestamp === 'number' && Number.isFinite(parsed.timestamp)
           ? { type: parsed.type, timestamp: parsed.timestamp } : null;

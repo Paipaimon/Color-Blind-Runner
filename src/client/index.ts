@@ -13,7 +13,7 @@ import { InputMerger } from './input-merger.js';
 import { CanvasRenderer } from './canvas-renderer.js';
 import { ViewportManager } from './viewport-manager.js';
 import { StatusBarRenderer } from './status-bar-renderer.js';
-import { ServerMessage, ServerMessageType } from '../shared/messages.js';
+import { ServerMessage, ServerMessageType, ClientMessageType } from '../shared/messages.js';
 import { VisibleState, GameState, PlayerColor, ObstacleColor } from '../shared/types.js';
 import { GAME_CONFIG } from '../shared/constants.js';
 
@@ -170,6 +170,24 @@ class GameClient {
         this.inputMerger.updateTouchInput({ up: false, down: false, left: false, right: false });
       });
     }
+
+    let pointerStart: { x: number; y: number; at: number; id: number } | null = null;
+    canvas.addEventListener('pointerdown', event => {
+      if (!event.isPrimary) return;
+      pointerStart = { x: event.clientX, y: event.clientY, at: performance.now(), id: event.pointerId };
+    });
+    canvas.addEventListener('pointercancel', () => { pointerStart = null; });
+    canvas.addEventListener('pointerup', event => {
+      const start = pointerStart;
+      pointerStart = null;
+      if (!start || start.id !== event.pointerId || !this.currentState || this.currentState.gameState !== GameState.PLAYING) return;
+      if (performance.now() - start.at > 350 || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 12) return;
+      const obstacleId = this.renderer.pickObstacle(event.clientX, event.clientY, this.currentState);
+      if (obstacleId) this.wsClient.send({ type: ClientMessageType.WARN_OBSTACLE, obstacleId });
+    });
+    document.getElementById('findNewRoom')?.addEventListener('click', () => {
+      this.wsClient.joinRoom();
+    });
 
     // 键盘：空格 / 回车 等同于点击操作按钮
     window.addEventListener('keydown', (e) => {
@@ -716,7 +734,14 @@ class GameClient {
           this.readyPlayerIds = new Set(message.state.players.filter(player => player.ready).map(player => player.id));
           this.isReady = this.readyPlayerIds.has(this.myPlayerId ?? '');
           this.statusBarRenderer?.updateRoster(this.onlinePlayerIds, this.readyPlayerIds);
-          this.handleGameState(message);
+          if (message.state.gameState !== GameState.GAME_OVER) this.handleGameState(message);
+          this.refreshActionButton();
+          break;
+        case ServerMessageType.TEAM_WARNING:
+          if (this.myPlayerId && this.currentState?.gameState === GameState.PLAYING) {
+            this.sessionHud.showWarning(message.warning, this.myPlayerId);
+            if (message.warning.toPlayerId === this.myPlayerId) this.renderer.showTeamWarning(message.warning.route, message.warning.durationMs);
+          }
           break;
         case ServerMessageType.GAME_STATE:
           this.handleGameState(message);
@@ -865,10 +890,16 @@ class GameClient {
    * 处理倒计时
    */
   private handleCountdown(message: { seconds: number }): void {
+    if (this.currentState?.gameState === GameState.GAME_OVER) {
+      this.currentState = { ...this.currentState, gameState: GameState.WAITING, obstacles: [], powerUps: [] };
+      this.renderer.resetAll();
+      this.statusBarRenderer?.render(this.currentState, this.myPlayerId!, this.roomId ?? undefined, this.myPlayerColor ?? undefined);
+    }
     if (this.currentState) {
       this.currentState.countdown = message.seconds;
       this.currentState.gameState = GameState.COUNTDOWN;
       this.renderer.render(this.currentState);
+      this.sessionHud.render(this.currentState, this.myPlayerId!);
 
       // Requirements: 3.1 - 更新状态栏显示倒计时
       if (this.statusBarRenderer && this.myPlayerId) {
@@ -883,6 +914,9 @@ class GameClient {
    * 处理游戏开始
    */
   private handleGameStart(): void {
+    this.renderer.resetAll();
+    this.sessionHud.beginRound();
+    this.inputMerger.reset();
     // Requirements: 1.5, 6.1, 6.2 - 绑定键盘和触控输入处理器
     this.inputHandler.bind();
     this.touchHandler.bind();
@@ -924,6 +958,7 @@ class GameClient {
     this.stopCanvasAnimation();
 
     this.isReady = false;
+    this.readyPlayerIds.clear();
     this.currentState = message.finalState;
     this.renderer.render(message.finalState);
     if (this.myPlayerId) this.sessionHud.render(message.finalState, this.myPlayerId, message.winners);
@@ -968,17 +1003,9 @@ class GameClient {
   private handleReadyAction(): void {
     if (!this.currentState || !this.isConnected) return;
 
-    if (this.currentState.gameState === GameState.WAITING && !this.isReady) {
+    if ((this.currentState.gameState === GameState.WAITING || this.currentState.gameState === GameState.GAME_OVER) && !this.isReady) {
       this.wsClient.sendReady();
       this.isReady = true;
-      this.refreshActionButton();
-    } else if (this.currentState.gameState === GameState.GAME_OVER) {
-      // 重置渲染器状态
-      this.renderer.resetAll();
-      // 重新加入房间（花名册由新的 ROOM_JOINED 重建）
-      this.resetRoster();
-      this.wsClient.joinRoom();
-      this.isReady = false;
       this.refreshActionButton();
     }
   }
@@ -1189,9 +1216,13 @@ class GameClient {
     // 大厅阶段以房间在线人数为准（服务端在等待阶段不下发玩家列表），
     // 对局开始后状态里的玩家数即为实际游玩人数。
     const rosterCount = this.onlinePlayerIds.size;
-    const playerCount = this.currentState?.players.length || rosterCount || 0;
+    const playerCount = rosterCount;
     const gameState = this.currentState?.gameState ?? GameState.WAITING;
+    const wrapper = document.querySelector('.game-wrapper') as HTMLElement | null;
+    if (wrapper) wrapper.dataset.phase = gameState;
 
+    const findNewRoom = document.getElementById('findNewRoom');
+    if (findNewRoom) findNewRoom.hidden = gameState !== GameState.GAME_OVER && gameState !== GameState.WAITING;
     let label = '连接中…';
     let disabled = true;
     let variant: ActionSignature['variant'] = 'default';
@@ -1242,10 +1273,12 @@ class GameClient {
         }
 
         case GameState.GAME_OVER:
-          label = '重新开始';
-          disabled = false;
+          label = this.isReady ? '已准备 · 等待队友' : '再来一局';
+          disabled = this.isReady;
           variant = 'accent';
-          hint = '按 <kbd>空格</kbd> 也可以重新开始';
+          hint = playerCount < GAME_CONFIG.MIN_PLAYERS
+            ? '队友已离开，可以重新匹配'
+            : '原房间再战 · ' + this.readyPlayerIds.size + '/' + playerCount + ' 已准备';
           break;
       }
     }

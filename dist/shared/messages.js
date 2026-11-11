@@ -7,6 +7,7 @@ export var ClientMessageType;
     ClientMessageType["LEAVE_ROOM"] = "LEAVE_ROOM";
     ClientMessageType["PLAYER_INPUT"] = "PLAYER_INPUT";
     ClientMessageType["READY"] = "READY";
+    ClientMessageType["WARN_OBSTACLE"] = "WARN_OBSTACLE";
     ClientMessageType["PING"] = "PING";
 })(ClientMessageType || (ClientMessageType = {}));
 /**
@@ -25,6 +26,7 @@ export var ServerMessageType;
     ServerMessageType["GAME_OVER"] = "GAME_OVER";
     ServerMessageType["PLAYER_DIED"] = "PLAYER_DIED";
     ServerMessageType["ERROR"] = "ERROR";
+    ServerMessageType["TEAM_WARNING"] = "TEAM_WARNING";
     ServerMessageType["PONG"] = "PONG";
 })(ServerMessageType || (ServerMessageType = {}));
 /**
@@ -45,6 +47,9 @@ export function parseClientMessage(data) {
             case ClientMessageType.LEAVE_ROOM:
             case ClientMessageType.READY:
                 return { type: parsed.type };
+            case ClientMessageType.WARN_OBSTACLE:
+                return typeof parsed.obstacleId === 'string' && /^obstacle_[0-9]{1,10}$/.test(parsed.obstacleId)
+                    ? { type: parsed.type, obstacleId: parsed.obstacleId } : null;
             case ClientMessageType.PING:
                 return typeof parsed.timestamp === 'number' && Number.isFinite(parsed.timestamp)
                     ? { type: parsed.type, timestamp: parsed.timestamp } : null;

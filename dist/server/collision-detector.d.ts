@@ -24,6 +24,11 @@ export interface Player {
     invulnerableUntil?: number;
     survivalTime?: number;
     totalMoves?: number;
+    warningsSent?: number;
+    lastDamage?: {
+        route: number;
+        distance: number;
+    };
 }
 /**
  * 障碍物

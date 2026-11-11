@@ -1,3 +1,4 @@
+import { phaseAtTime, ROUND_DURATION } from '../shared/round-rules.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as http from 'node:http';
 import { readFile, realpath } from 'node:fs/promises';
@@ -75,6 +76,7 @@ export class GameServer {
             winners: scores.filter(score => score.alive).map(score => score.id),
             finalState: this.project(room, player.id) });
         }
+        this.broadcastLobby(roomId);
       },
       onStateUpdate: (roomId, room) => {
         for (const player of room.players) {
@@ -153,6 +155,17 @@ export class GameServer {
             this.gameLoop.handlePlayerInput(connection.roomId, player.id, route);
             break;
           }
+          case ClientMessageType.WARN_OBSTACLE: {
+            if (!connection.roomId || !connection.playerId) break;
+            const warning = this.gameLoop.warnObstacle(connection.roomId, connection.playerId, message.obstacleId);
+            if (warning) {
+              for (const id of [warning.fromPlayerId, warning.toPlayerId]) {
+                const recipient = this.playerSockets.get(id);
+                if (recipient) this.send(recipient, { type: ServerMessageType.TEAM_WARNING, warning });
+              }
+            }
+            break;
+          }
           case ClientMessageType.PING:
             this.send(ws, { type: ServerMessageType.PONG, timestamp: message.timestamp, serverTime: Date.now() });
             break;
@@ -211,7 +224,7 @@ export class GameServer {
 
   private broadcastLobby(roomId: string): void {
     const room = this.roomManager.getRoom(roomId);
-    if (!room || (room.gameState !== GameState.WAITING && room.gameState !== GameState.COUNTDOWN)) return;
+    if (!room || room.gameState === GameState.PLAYING) return;
     this.broadcast(roomId, { type: ServerMessageType.ROOM_STATE, state: {
       players: this.roomManager.getPlayersInRoom(roomId), obstacles: [], powerUps: [],
       gameState: room.gameState, scrollSpeed: 0
@@ -219,8 +232,9 @@ export class GameServer {
   }
 
   private startCountdown(roomId: string): void {
+    const rematch = this.roomManager.getRoom(roomId)?.gameState === GameState.GAME_OVER;
     if (!this.roomManager.startGame(roomId)) return;
-    let seconds = GAME_CONFIG.COUNTDOWN_SECONDS;
+    let seconds: number = rematch ? 2 : GAME_CONFIG.COUNTDOWN_SECONDS;
     this.broadcast(roomId, { type: ServerMessageType.COUNTDOWN, seconds });
     const timer = setInterval(() => {
       seconds--;
@@ -249,13 +263,17 @@ export class GameServer {
     const cell = GAME_CONFIG.CELL_SIZE;
     return {
       gameState: room.gameState === LoopState.ENDED ? GameState.GAME_OVER : GameState.PLAYING,
-      scrollSpeed: GAME_CONFIG.WORLD_SPEED,
+      scrollSpeed: phaseAtTime(room.elapsed ?? 0).speed,
+      phase: phaseAtTime(room.elapsed ?? 0).id,
+      remainingSeconds: Math.max(0, ROUND_DURATION - (room.elapsed ?? 0)),
+      endReason: room.endReason,
       players: room.players.map(player => ({
         id: player.id, color: player.color, isAlive: player.alive,
         position: { x: player.route * cell + cell / 2, y: player.distance },
         distance: player.distance, lives: player.lives, shield: player.shield,
         invulnerableFor: Math.max(0, (player.invulnerableUntil ?? 0) - (room.elapsed ?? 0)),
-        survivalTime: player.survivalTime, totalMoves: player.totalMoves
+        survivalTime: player.survivalTime, totalMoves: player.totalMoves,
+        warningsSent: player.warningsSent, lastDamage: player.lastDamage
       })),
       obstacles: this.visibility.filterObstacles(room.obstacles, viewer.color)
         .map(obstacle => ({ id: obstacle.id, color: obstacle.color as unknown as ObstacleColor,
